@@ -93,4 +93,33 @@ Running log of every significant issue encountered during the hackathon: root ca
 
 ---
 
+### [BUG-008] Sidekiq fails — not in Gemfile
+- **Date:** 2026-03-05
+- **Severity:** Medium
+- **Status:** Fixed
+- **Symptom:** `decidim-sidekiq.service` crashes — `bundler: command not found: sidekiq`
+- **Root Cause:** Decidim depends on Sidekiq but doesn't add it to the generated Gemfile automatically.
+- **Fix:** Add `gem "sidekiq", "~> 7.0"` to Gemfile + `bundle install`
+- **Lesson:** Always check Gemfile after `decidim` generation for missing runtime deps.
+
+### [BUG-009] Sidekiq can't connect to Redis — port not exposed
+- **Date:** 2026-03-05
+- **Severity:** Medium
+- **Status:** Fixed
+- **Symptom:** `Connection refused - connect(2) for 127.0.0.1:6379`
+- **Root Cause:** Redis runs in Docker with no port binding to host. Native processes can't reach it.
+- **Fix:** Add `ports: - "127.0.0.1:6379:6379"` to redis service in rpg-forum docker-compose.yml
+- **Lesson:** Any native service (non-Docker) that needs Redis must have the port exposed. Same pattern as PostgreSQL.
+
+### [BUG-010] rbenv not initialized in systemd service context
+- **Date:** 2026-03-05
+- **Severity:** High
+- **Status:** Fixed
+- **Symptom:** systemd service fails with exit code 127 — `bundle` not found
+- **Root Cause:** systemd runs with minimal environment. `rbenv init` must be called explicitly.
+- **Fix:** Wrapper script `/usr/local/bin/decidim-start.sh` that exports HOME, adds rbenv to PATH, calls `eval "$(rbenv init -)"`, then execs bundle.
+- **Lesson:** Never set rbenv shim paths directly in systemd Environment= — use a wrapper script.
+
+---
+
 *Last updated: 2026-03-05*
