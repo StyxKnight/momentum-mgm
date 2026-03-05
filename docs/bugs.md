@@ -122,4 +122,51 @@ Running log of every significant issue encountered during the hackathon: root ca
 
 ---
 
+### [BUG-011] Decidim GraphQL API exposes 0 mutations
+- **Date:** 2026-03-05
+- **Severity:** High
+- **Status:** Fixed
+- **Symptom:** `__schema { mutationType { fields } }` returns empty array. `createProposal` mutation unavailable.
+- **Root Cause:** Decidim 0.31 GraphQL API is read-only by default. Admin mutations are not exposed without additional configuration (decidim-api gem settings or API tokens).
+- **Fix:** Bypass GraphQL entirely for seeding. Use Rails runner (`/usr/local/bin/decidim-start.sh rails runner script.rb`) to insert records directly via ActiveRecord. seed.py generates proposals JSON → Rails script inserts them.
+- **Lesson:** Decidim GraphQL = good for reads, not for admin writes. Use Rails runner or direct DB for seeding.
+
+### [BUG-012] Decidim seed data corrupts search index — callbacks fail on save
+- **Date:** 2026-03-05
+- **Severity:** Medium
+- **Status:** Fixed
+- **Symptom:** `rails runner` script fails with `undefined method '[]' for nil` inside `decidim/searchable.rb` when trying to save admin user.
+- **Root Cause:** Fake seed data (from `rails db:seed`) creates records with malformed searchable content. Saving any user triggers a reindex callback that iterates over related records and chokes on nil content.
+- **Fix:** Use `update_columns(...)` instead of `save!` to bypass all callbacks and validations when updating admin credentials.
+- **Lesson:** `update_columns` = direct SQL UPDATE, no callbacks, no validations. Use it when touching seed-polluted records.
+
+### [BUG-015] Google AI Studio free tier quota = 0, billing not enabled
+- **Date:** 2026-03-05
+- **Severity:** High
+- **Status:** Fixed
+- **Symptom:** `429 RESOURCE_EXHAUSTED — quota exceeded, limit: 0` on every Gemini call
+- **Root Cause:** Free tier API key from AI Studio has `limit: 0` when billing is not activated on the associated Google Cloud project.
+- **Fix:** Switched AI provider for seeder to OpenRouter (already configured, $7 balance, Grok functional). The MCP server classifier keeps using OpenRouter too for consistency.
+- **Lesson:** Google AI Studio free keys require billing enabled on the GCP project. Alternative: use OpenRouter as a unified AI gateway — one key, multiple models, pay-per-use.
+
+### [BUG-013] google-generativeai SDK deprecated — model not found
+- **Date:** 2026-03-05
+- **Severity:** High
+- **Status:** Fixed
+- **Symptom:** `404 models/gemini-1.5-flash is not found for API version v1beta`
+- **Root Cause:** `google-generativeai` package is fully deprecated as of early 2026. It targets the old v1beta API where `gemini-1.5-flash` no longer resolves.
+- **Fix:** Migrate to `google-genai` package. New import: `from google import genai`. New model name: `gemini-2.0-flash`.
+- **Lesson:** Always use `google-genai` (new SDK), never `google-generativeai` (deprecated). Model ID: `gemini-2.0-flash`.
+
+### [BUG-014] Rails runner `save!` fails — `Password is too short`
+- **Date:** 2026-03-05
+- **Severity:** Low
+- **Status:** Fixed
+- **Symptom:** ActiveRecord::RecordInvalid on admin password update — password too short.
+- **Root Cause:** Decidim enforces a minimum password length (12 chars by default). `Momentum2026!` is 13 chars — was actually fine. Real issue was the search index callback (see BUG-012).
+- **Fix:** Use `update_columns` with `Devise::Encryptor.digest` to bypass validations entirely.
+- **Lesson:** When you need to set a password without Devise validations, use `update_columns(encrypted_password: Devise::Encryptor.digest(Model, "password"))`.
+
+---
+
 *Last updated: 2026-03-05*

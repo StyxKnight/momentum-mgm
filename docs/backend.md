@@ -14,103 +14,77 @@ Decidim itself (Ruby on Rails) handles all civic platform logic: proposals, voti
 ## Component 1 — Bright Data Seeder
 
 ### Purpose
-Populate the Decidim platform with real Montgomery civic data before launch so the demo platform isn't empty.
+Populate the Decidim platform with real Montgomery civic data before launch so the demo platform isn't empty. Also powers ongoing data refresh as the platform grows.
 
 ### Directory
 ```
 seeder/
+├── venv/              ← Python virtualenv (not committed)
 ├── requirements.txt
-├── .env.example
 ├── scrape.py          ← Bright Data → raw JSON files
-├── seed.py            ← JSON → Decidim GraphQL API
-├── categories.py      ← Reed priority mapping
+├── seed.py            ← Gemini Flash generates proposals → Rails runner inserts
 └── data/
-    └── scraped/       ← cached scrape output
+    └── scraped/       ← cached scrape output (committed)
+        ├── city_pages.json
+        ├── category_searches.json
+        ├── mayor_priorities.json
+        └── 311_data.json
 ```
 
-### Data Sources (Bright Data targets)
+### How It Works
+```
+scrape.py
+  → Bright Data SDK (SyncBrightDataClient)
+  → Scrapes: city pages, Google searches per category, mayor priorities, 311 data
+  → Output: data/scraped/*.json
+
+seed.py
+  → Loads scraped JSON context
+  → Calls Gemini 2.0 Flash (google-genai SDK) to generate 6 proposals per category
+  → Writes proposals to /tmp/momentum_proposals.json
+  → Calls Rails runner to insert via ActiveRecord (bypasses GraphQL limitation)
+```
+
+### Key Decision: Rails Runner for Insertion (not GraphQL)
+Decidim 0.31 GraphQL API is **read-only** by default — no admin mutations exposed.
+Attempted `createProposal` mutation returns 0 available mutations on introspection.
+Solution: seed.py generates JSON → `/usr/local/bin/decidim-start.sh rails runner script.rb` inserts via ActiveRecord directly.
+This is reliable, fast, and avoids any auth/permission complexity.
+
+### Bright Data SDK Usage
 ```python
-SOURCES = [
-    {
-        "url": "https://www.montgomeryal.gov/city-government/news",
-        "type": "civic_news",
-        "extract": ["title", "date", "summary"]
-    },
-    {
-        "url": "https://www.montgomeryal.gov/residents/public-safety",
-        "type": "public_safety",
-        "extract": ["stats", "initiatives"]
-    },
-    {
-        "url": "https://www.montgomeryal.gov/business",
-        "type": "economic",
-        "extract": ["programs", "incentives"]
-    }
-]
-```
+from brightdata import SyncBrightDataClient
 
-### Categories — Reed Priority Mapping
+with SyncBrightDataClient() as client:
+    # Web search
+    result = client.search.google(query="Montgomery Alabama ...", num_results=8)
+    # Page scraping (bypasses anti-bot, CAPTCHAs, 403s)
+    result = client.scrape_url("https://opendata.montgomeryal.gov/...")
+```
+Env var: `BRIGHTDATA_API_TOKEN`
+
+### AI Generation — google-genai SDK (NOT google-generativeai)
+`google-generativeai` is **fully deprecated** as of 2026. Always use `google-genai`.
 ```python
-CATEGORIES = {
-    "public_safety": {
-        "label": "Public Safety & Crime",
-        "description": "Police, violence, repeat offenders, Aniah's Law",
-        "reed_priority": 1,
-        "color": "#EF4444",
-        "icon": "🛡️",
-    },
-    "blight": {
-        "label": "Blight & Neighborhood Revitalization",
-        "description": "Abandoned buildings, Southern Boulevard, West Montgomery",
-        "reed_priority": 2,
-        "color": "#F97316",
-        "icon": "🏚️",
-    },
-    "economy": {
-        "label": "Economic Growth & Jobs",
-        "description": "Small business, Meta investment, manufacturing, Access Montgomery",
-        "reed_priority": 3,
-        "color": "#22C55E",
-        "icon": "💼",
-    },
-    "infrastructure": {
-        "label": "Infrastructure & Smart City",
-        "description": "Roads, transit, convention center, inland port",
-        "reed_priority": 4,
-        "color": "#3B82F6",
-        "icon": "🏗️",
-    },
-    "services": {
-        "label": "City Services & Access",
-        "description": "Healthcare, housing, homelessness, opioids, digital access",
-        "reed_priority": 5,
-        "color": "#8B5CF6",
-        "icon": "🏥",
-    }
-}
+from google import genai
+client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
 ```
 
-### Decidim GraphQL — Create Proposal
-```python
-# Auth: POST /api/sign_in → JWT token
-# Then: POST /api with Authorization: Bearer <token>
-
-CREATE_PROPOSAL_MUTATION = """
-mutation CreateProposal($componentId: ID!, $title: String!, $body: String!) {
-  createProposal(input: {
-    componentId: $componentId
-    title: { en: $title }
-    body: { en: $body }
-  }) {
-    proposal {
-      id
-      title { en }
-    }
-    errors
-  }
-}
-"""
+### 10 Civic Categories
 ```
+infrastructure  → Infrastructure & Roads
+environment     → Water, Utilities & Environment
+housing         → Housing & Neighborhoods
+public_safety   → Public Safety
+transportation  → Transportation & Mobility
+health          → Health & Social Services
+education       → Education & Youth
+economy         → Economy & Employment
+parks_culture   → Parks, Culture & Recreation
+governance      → Governance & Democracy
+```
+Note: No `reed_priority` field — categories are the source of truth, not a priority ranking.
 
 ---
 
