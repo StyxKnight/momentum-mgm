@@ -2,60 +2,67 @@
 
 ## Overview
 
-Momentum MGM is a civic participation platform built on Decidim (the same platform used by Barcelona, Montreal, Quebec City) extended with an AI layer via MCP (Model Context Protocol). Citizens engage through the Decidim interface; city administrators interact with Claude Desktop which uses our MCP server to query and analyze civic data in real time.
+Momentum MGM is a civic participation platform built on Decidim extended with an AI layer via MCP (Model Context Protocol). Citizens engage through the Decidim interface; city administrators interact with Claude Desktop which uses our MCP server to query and analyze civic data in real time.
 
 ---
 
-## System Diagram
+## System Diagram (current state — Day 2)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  CITIZENS (mgm.styxcore.dev)                                │
-│  Submit proposals · Vote · Comment · Pol.is opinion polls   │
+│  Submit proposals · Vote · Comment                          │
 └────────────────────────┬────────────────────────────────────┘
                          │ HTTPS (Cloudflare tunnel)
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  NGINX (reverse proxy, existing)                            │
-│  mgm.styxcore.dev → localhost:3000 (Decidim)                │
+│  NGINX (reverse proxy)                                      │
+│  mgm.styxcore.dev → 172.21.0.1:3000 (Decidim on host)      │
 └────────────────────────┬────────────────────────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  DECIDIM (Ruby on Rails, native ARM64, port 3000)           │
-│  - Participatory processes                                  │
-│  - Proposals, votes, comments, initiatives                  │
-│  - Pol.is opinion clustering (decidim-polis gem)            │
-│  - GraphQL API at /api                                      │
+│  DECIDIM 0.31 (Ruby on Rails, native ARM64, port 3000)      │
+│  - 10 Participatory Processes (one per civic category)      │
+│  - 60 seeded proposals (real Montgomery context)            │
+│  - Proposals, votes, comments                               │
+│  - GraphQL API at /api (PUBLIC READ-ONLY — no mutations)    │
 │  - Admin dashboard at /admin                                │
-│  - Authelia protection on /admin                            │
 └────────┬───────────────────────────────────────┬────────────┘
          │                                       │
          ▼                                       ▼
 ┌─────────────────┐                   ┌──────────────────────┐
 │  PostgreSQL 15  │                   │  Redis 7             │
-│  (existing      │                   │  (existing Docker)   │
-│  Docker, new DB │                   │  Sidekiq jobs        │
-│  `momentum`)    │                   │  Sessions, cache     │
+│  NATIVE on host │                   │  Docker container    │
+│  DB: momentum   │                   │  port 6379 exposed   │
+│  127.0.0.1:5432 │                   │  Sidekiq + sessions  │
 └─────────────────┘                   └──────────────────────┘
 
-                         │
-         ┌───────────────┼───────────────────┐
-         │               │                   │
-         ▼               ▼                   ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  MCP SERVER (Python, port 8080)                             │
-│  Tools: get_proposals · classify_proposal · get_clusters    │
-│         get_montgomery_context · recommend_action           │
-│         create_proposal · analyze_trends                    │
+│  BRIGHT DATA PIPELINE (scrape.py + seed.py)                 │
+│  Bright Data SDK → scrape montgomeryal.gov + SERP           │
+│  Grok-4-Fast generates proposals from scraped context       │
+│  Rails runner inserts via ActiveRecord (NOT GraphQL)        │
+│  → 60 proposals across 10 categories ✅                     │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  MCP SERVER (Python, FastMCP, stdio — NOT HTTP port)        │
+│  6 tools:                                                   │
+│  - get_proposals(category?, limit?)                         │
+│  - classify_proposal(text) → AI classification             │
+│  - analyze_trends() → vote counts + top proposals          │
+│  - recommend_action(topic) → city advisory + 311 routing   │
+│  - get_platform_summary() → full snapshot                   │
+│  - get_montgomery_context(topic) → scraped data lookup      │
 └────────────────────────┬────────────────────────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  OPENROUTER → GEMINI FLASH                                  │
-│  Classification · Clustering labels · Recommendations       │
+│  OPENROUTER → GROK-4-FAST (primary)                         │
+│  GOOGLE GEMINI 2.5 FLASH (automatic fallback)               │
+│  Classification · Recommendations · Summaries               │
 └─────────────────────────────────────────────────────────────┘
-
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
@@ -63,13 +70,16 @@ Momentum MGM is a civic participation platform built on Decidim (the same platfo
 │  Mayor / city admin chats with Claude                       │
 │  Claude calls MCP tools, analyzes proposals, advises        │
 └─────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────┐
-│  BRIGHT DATA PIPELINE (one-time + periodic)                 │
-│  Scrape montgomeryal.gov → Python seeder                    │
-│  → Decidim GraphQL API → proposals, civic_data table        │
-└─────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## What Is NOT Yet Built (planned Days 3-5)
+
+- **Pol.is integration** (decidim-polis gem) — opinion clustering, Day 4
+- **Auto-classification on submission** — Sidekiq job to classify proposals when citizens submit. Currently classification is on-demand via MCP tool only.
+- **Proposal metadata storage** — category/summary from AI not yet stored back into Decidim. Currently computed live.
+- **Demo user account** — citizen-facing test account for the demo flow
 
 ---
 
@@ -77,74 +87,57 @@ Momentum MGM is a civic participation platform built on Decidim (the same platfo
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Civic platform | Decidim (native install) | Proven at scale (Barcelona, Brazil, Quebec). Full feature set. Better than building from scratch. |
-| ARM64 strategy | Native install (not Docker) | Official Decidim Docker image is amd64-only. Ruby 3.3 runs natively on ARM64/aarch64 Debian. ~1h install. |
-| Opinion layer | Pol.is via decidim-polis gem | Embeds directly in Decidim processes. Visual consensus clustering. Used in Taiwan's vTaiwan. |
-| AI model | Gemini Flash (OpenRouter) | Fast, cheap per token, switchable. OpenRouter key already exists. |
-| MCP protocol | Anthropic MCP (Python) | Native Claude integration. Admin can literally talk to the platform. Novel for civic tech. |
-| DB | PostgreSQL 15 (existing) | Already running, just add `momentum` database. |
-| Cache | Redis 7 (existing) | Already running (rpg-forum-redis container). Decidim/Sidekiq use it directly. |
-| Proxy | Nginx Proxy Manager (existing) | Add new proxy host mgm.styxcore.dev → localhost:3000. |
-| Auth | Authelia (existing) | Protect /admin path. Already deployed and working. |
-| Tunnel | Cloudflare (existing) | Add mgm.styxcore.dev tunnel route. |
+| Civic platform | Decidim (native install) | Proven at scale (Barcelona, Brazil, Quebec). Full feature set. |
+| ARM64 strategy | Native install (not Docker) | Official Decidim Docker image is amd64-only. |
+| AI primary | Grok-4-Fast via OpenRouter | Fast, cost-effective, already configured |
+| AI fallback | Gemini 2.5 Flash (Google direct) | Auto fallback if OpenRouter fails |
+| MCP protocol | FastMCP (stdio) | Native Claude Desktop integration. Not HTTP — runs as subprocess. |
+| DB | PostgreSQL 15 (native) | Already running natively on host. NOT Docker. |
+| Cache | Redis 7 (Docker, port 6379 exposed to host) | Already running for RPG Forum project. |
+| Seeder writes | Rails runner (NOT GraphQL) | Decidim 0.31 GraphQL exposes 0 mutations. Direct ActiveRecord only. |
+| Proposal generation | AI from scraped context | Real Montgomery data (streets, neighborhoods) → credible proposals |
 
 ---
 
 ## Key Design Decisions
 
-| Decision | Rationale | Alternative Considered |
-|---|---|---|
-| Use Decidim as-is, don't fork | 5-day hackathon, feature completeness matters | Custom FastAPI platform — doable but loses Decidim's credibility signal |
-| Pol.is as optional Day 4 feature | High impact for demo, low-risk since it's a gem add | Skip entirely — safer but less impressive |
-| MCP server in Python (not Node.js) | Seeder also in Python, same venv/dependencies | Node.js — unnecessary context switch |
-| Seed with Bright Data first, open submissions second | Platform looks alive from demo day 1 | Empty platform — bad demo experience |
-| Gemini Flash not Claude for classification | Cost. Classifying 50-100 proposals per demo = pennies | Claude Sonnet — 10x more expensive for this use case |
+| Decision | Rationale |
+|---|---|
+| 10 categories (not Reed's 5 priorities) | Civic taxonomy is stable; priorities change with mayors. Maps to 311 categories and city departments. |
+| No `civic_data` table | Scraped data lives in JSON files. MCP reads from files directly. Simpler, no extra DB schema. |
+| Rails runner for seeding | GraphQL is read-only. ActiveRecord is reliable and bypasses all API limitations. |
+| GraphQL for MCP reads | Proposals are public. No auth needed. Clean separation: reads via API, writes via Rails. |
+| OpenRouter as AI gateway | One key, multiple models, automatic model switching. Better than managing multiple API keys. |
 
 ---
 
-## Data Flow — Proposal Lifecycle
+## Data Flow — Proposal Lifecycle (current)
 
 ```
-1. Citizen submits proposal (Decidim UI)
-        ↓
-2. Proposal saved in Decidim DB (PostgreSQL momentum)
-        ↓
-3. Sidekiq job triggered (async)
-        ↓
-4. MCP Server classify_proposal() → Gemini Flash
-        ↓
-5. Category + summary + confidence stored back in proposal metadata
-        ↓
-6. Cluster engine groups with similar proposals
-        ↓
-7. Admin sees categorized, clustered proposals in Decidim dashboard
-        ↓
-8. Admin opens Claude Desktop → asks natural language question
-        ↓
-9. Claude calls MCP tools → queries proposals/clusters/civic_data
-        ↓
-10. Claude returns analysis + actionable recommendation
+SEEDING (one-time):
+  scrape.py → Bright Data → 4 JSON files
+  seed.py → Grok-4-Fast → proposals JSON → Rails runner → Decidim DB
+
+CITIZEN SUBMISSION (live):
+  Citizen → Decidim UI → proposal saved in DB (no auto-classification yet)
+
+ADMIN QUERY (via Claude Desktop):
+  Admin asks Claude → Claude calls MCP tool → GraphQL query → Decidim DB
+  → Claude analyzes + recommends → Admin acts
 ```
 
 ---
 
-## Infrastructure Already Available
+## Infrastructure
 
-| Service | Container/Location | Status | Used by Momentum |
+| Service | Location | Status | Role |
 |---|---|---|---|
-| PostgreSQL 15 | rpg-forum-db | ✅ Up | New `momentum` DB |
-| Redis 7 | rpg-forum-redis | ✅ Up (PONG) | Decidim + Sidekiq |
-| Nginx | rpg-nginx | ✅ Up | New vhost for mgm. |
-| Nginx Proxy Manager | nginx-proxy-manager-app-1 | ✅ Up | GUI proxy config |
-| Authelia | rpg-authelia | ✅ Up + healthy | Protect /admin |
-| Cloudflare Tunnel | (cloudflared) | ✅ Active | mgm.styxcore.dev |
-| Domain | styxcore.dev | ✅ Owned | Subdomain mgm. |
-
-**RAM budget:**
-- Current usage: ~2.5GB / 7.9GB
-- Decidim (Puma 4 workers): ~700MB
-- Sidekiq: ~250MB
-- Available after Momentum: ~4.4GB ✅
+| PostgreSQL 15 | Native host 127.0.0.1:5432 | ✅ Up | Decidim DB (`momentum`) |
+| Redis 7 | Docker rpg-forum-redis, port 6379 | ✅ Up | Sidekiq + sessions |
+| Nginx | Docker rpg-nginx | ✅ Up | Reverse proxy |
+| Cloudflare Tunnel | cloudflared service | ✅ Active | mgm.styxcore.dev |
+| Decidim (Puma) | Native port 3000 | ✅ systemd | Civic platform |
+| Sidekiq | Native | ✅ systemd | Background jobs |
 
 ---
 

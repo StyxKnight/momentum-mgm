@@ -100,7 +100,7 @@ Built with open-source tools. Minimal ongoing cost.
 |---|---|
 | Civic Platform | Decidim (Ruby on Rails) |
 | Opinion Layer | Pol.is (via decidim-polis) |
-| AI Classifier | Gemini Flash via OpenRouter |
+| AI Classifier | Grok-4-Fast via OpenRouter (Gemini Flash fallback) |
 | Data | Bright Data (scraped from montgomeryal.gov) |
 | Admin Bridge | Anthropic MCP + Claude Desktop |
 | Infrastructure | Docker, Nginx, Cloudflare, PostgreSQL 15 |

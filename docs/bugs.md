@@ -216,4 +216,60 @@ Running log of every significant issue encountered during the hackathon: root ca
 
 ---
 
+---
+
+## Architecture Divergences — Plan vs Reality
+
+Recorded during Day 2 full doc audit. These are intentional deviations from original design, not bugs. Kept here for hackathon transparency.
+
+### [DIV-001] Seeder insertion method: GraphQL → Rails runner
+- **Date:** 2026-03-05
+- **Original plan:** seed.py inserts proposals via Decidim GraphQL API (`createProposal` mutation)
+- **Reality:** Decidim 0.31 GraphQL exposes 0 mutations (public read-only). Rails runner via `decidim-start.sh rails runner script.rb` is the only write path.
+- **Impact:** seed.py calls `insert_proposals_via_rails()` instead of any GraphQL mutation. backend.md and architecture.md updated.
+
+### [DIV-002] Primary AI provider: Gemini Flash → Grok-4-Fast via OpenRouter
+- **Date:** 2026-03-05
+- **Original plan:** Gemini Flash (google-genai SDK) as primary AI for seeder + MCP classifier
+- **Reality:** Google AI Studio free tier has `limit: 0` quota. Switched to OpenRouter (`x-ai/grok-4-fast`) as primary. Gemini kept as fallback only.
+- **Impact:** All AI calls go through OpenRouter first. Gemini is `except` branch. pitch-deck.md, architecture.md, README.md updated.
+
+### [DIV-003] MCP server transport: HTTP port → stdio
+- **Date:** 2026-03-05
+- **Original plan:** MCP server exposed on HTTP port (e.g. 8080) for Claude Desktop to connect
+- **Reality:** FastMCP uses stdio transport by default. Claude Desktop runs it as a subprocess (`command` + `args` in config), not via HTTP. No port opened.
+- **Impact:** architecture.md updated. No network config needed for MCP.
+
+### [DIV-004] MCP server file structure: tools/ subdirectory → flat
+- **Date:** 2026-03-05
+- **Original plan:** `mcp-server/tools/proposals.py`, `classifier.py`, `clusters.py`, `context.py`
+- **Reality:** All 6 tools are in a single `server.py`. `decidim_client.py` is the only other file.
+- **Impact:** backend.md directory structure updated.
+
+### [DIV-005] MCP tools: planned set → actual set
+- **Date:** 2026-03-05
+- **Original plan:** `get_clusters`, `create_proposal` tools existed
+- **Reality:** These tools do not exist. Actual 6 tools: `get_proposals`, `classify_proposal`, `analyze_trends`, `recommend_action`, `get_platform_summary`, `get_montgomery_context`
+- **Impact:** backend.md tool list rewritten. README.md and architecture.md updated.
+
+### [DIV-006] Civic taxonomy: 5 Reed priorities → 10 civic categories
+- **Date:** 2026-03-05
+- **Original plan:** AI classifier aligned to Reed's 5 named priorities (public_safety, blight, economy, infrastructure, services)
+- **Reality:** Using 10 civic categories that map to 311 and city departments. Reed priorities change with mayors; civic taxonomy is stable. No `reed_priority` field in category data.
+- **Impact:** classify_proposal prompt, CATEGORIES dict, seeder categories all use the 10-category taxonomy.
+
+### [DIV-007] civic_data DB table → JSON files only
+- **Date:** 2026-03-05
+- **Original plan:** Scraped Montgomery data stored in a `civic_data` PostgreSQL table
+- **Reality:** Scraped data lives as 4 JSON files in `seeder/data/scraped/`. MCP reads them directly. No extra DB schema needed.
+- **Impact:** No migration needed. Simpler. `get_montgomery_context` reads files directly.
+
+### [DIV-008] Sidekiq auto-classification → on-demand only
+- **Date:** 2026-03-05
+- **Original plan:** When a citizen submits a proposal, a Sidekiq job auto-classifies it and writes the category back to the record
+- **Reality:** Not implemented. Classification is on-demand via `classify_proposal` MCP tool only. AI metadata (category, summary) not stored back into Decidim.
+- **Impact:** Still an open item for Day 4+ if time allows.
+
+---
+
 *Last updated: 2026-03-05*

@@ -16,7 +16,7 @@ Montgomery has no digital channel between citizens and city hall. Mayor Reed ann
 
 **Momentum MGM** is a civic participation platform — the same type used by Barcelona (40,000 participants), Quebec City, Montreal, and Brazil (36,000 proposals processed with AI) — deployed for Montgomery, Alabama, and extended with an AI layer that lets city administrators literally *talk to their city* through Claude.
 
-Citizens submit proposals in plain language. AI classifies them against Mayor Reed's stated priorities. A live dashboard shows city hall what citizens actually care about. And an AI admin bridge (via MCP) lets decision-makers query, analyze, and act on citizen input in real time.
+Citizens submit proposals in plain language. AI classifies them across 10 civic categories. A live dashboard shows city hall what citizens actually care about. And an AI admin bridge (via MCP) lets decision-makers query, analyze, and act on citizen input in real time.
 
 **The gap this fills:** Envision Montgomery 2040 + Reed's "Momentum" theme (State of the City 2026) describe exactly this kind of civic engagement infrastructure. It doesn't exist yet. We built it.
 
@@ -26,24 +26,22 @@ Citizens submit proposals in plain language. AI classifies them against Mayor Re
 
 ```
 LAYER 1 — PLATFORM (Decidim, native on ARM64)
-  Citizens → Decidim UI → proposals, votes, comments, initiatives
-  + Pol.is module → opinion clustering (visual consensus)
+  Citizens → Decidim UI → proposals, votes, comments
   Admin → Decidim dashboard → full participation management
 
 LAYER 2 — DATA (Bright Data → Python seeder)
-  Scrape montgomeryal.gov public data
-  → Generate realistic Montgomery proposals
-  → Seed into Decidim via GraphQL API
-  Platform is populated with real context from day 1
+  scrape.py: Bright Data SDK scrapes montgomeryal.gov
+  seed.py: Grok-4-Fast generates proposals → Rails runner inserts into Decidim
+  60 seeded proposals across 10 civic categories (real Montgomery context)
 
-LAYER 3 — AI (MCP Server, Python ~300 lines)
-  Tools exposed to Claude:
-  - get_proposals(category?, district?)
-  - classify_proposal(text) → Gemini Flash via OpenRouter
-  - create_proposal(title, body)
-  - get_clusters() → thematic trends
-  - get_montgomery_context(topic) → scraped civic data
-  - recommend_action(cluster_id) → city advisory
+LAYER 3 — AI (MCP Server, Python stdio)
+  6 tools exposed to Claude Desktop:
+  - get_proposals(category?, limit?)
+  - classify_proposal(text) → Grok-4-Fast via OpenRouter
+  - analyze_trends() → what Montgomery is talking about
+  - recommend_action(topic) → city advisory + 311 routing
+  - get_platform_summary() → full platform snapshot
+  - get_montgomery_context(topic) → scraped civic data lookup
 
 LAYER 4 — ADMIN BRIDGE (Claude Desktop + MCP)
   Mayor / city admin opens Claude Desktop
@@ -73,16 +71,15 @@ Montgomery doesn't have this. We built it.
 
 | Component | Technology | Notes |
 |---|---|---|
-| Civic Platform | Decidim (Ruby on Rails) | Installed natively on ARM64 Debian |
-| Opinion Layer | Pol.is via decidim-polis gem | Embedded in Decidim processes |
-| Database | PostgreSQL 15 (existing) | New `momentum` database |
-| Cache / Jobs | Redis 7 (existing) | Sidekiq background jobs |
-| AI Classifier | Gemini Flash via OpenRouter | Cheap, fast, switchable |
-| Data Scraping | Bright Data | montgomeryal.gov public data |
-| MCP Server | Python (FastAPI or stdio) | Claude ↔ Decidim bridge |
-| Reverse Proxy | Nginx + Nginx Proxy Manager | Existing setup |
-| Auth | Authelia (existing) | Admin dashboard protection |
-| Tunnel | Cloudflare (existing) | mgm.styxcore.dev public exposure |
+| Civic Platform | Decidim 0.31 (Ruby on Rails) | Native install on ARM64 Debian |
+| Database | PostgreSQL 15 (native) | `momentum` database on 127.0.0.1:5432 |
+| Cache / Jobs | Redis 7 (Docker) | Sidekiq background jobs |
+| AI — Generation | Grok-4-Fast via OpenRouter | Proposal generation + classification |
+| AI — Fallback | Gemini 2.5 Flash (Google) | Automatic fallback if OpenRouter fails |
+| Data Scraping | Bright Data SDK | montgomeryal.gov + Google SERP |
+| MCP Server | Python (FastMCP stdio) | Claude Desktop ↔ Decidim bridge |
+| Reverse Proxy | Nginx | mgm.styxcore.dev → localhost:3000 |
+| Tunnel | Cloudflare | Public exposure via existing tunnel |
 | Domain | styxcore.dev (owned) | Subdomain mgm. |
 
 ---
@@ -92,21 +89,25 @@ Montgomery doesn't have this. We built it.
 ```
 momentum-mgm/
 ├── README.md
-├── CONTRIBUTING.md
-├── CHANGELOG.md
 ├── docs/
-│   ├── architecture.md       ← System design, decisions, diagrams
-│   ├── deployment.md         ← Full setup guide, prerequisites
-│   ├── backend.md            ← MCP server + seeder documentation
-│   ├── data.md               ← DB schema, Decidim data model
-│   ├── api.md                ← Decidim GraphQL API reference
-│   ├── bugs.md               ← Issues encountered + solutions
+│   ├── how_it_works.md    ← Full technical explanation (start here)
+│   ├── architecture.md    ← System design + diagrams
+│   ├── backend.md         ← MCP server + seeder details
+│   ├── bugs.md            ← Issues log (20 bugs documented)
+│   ├── api.md             ← Decidim GraphQL API reference
+│   ├── data.md            ← DB schema
 │   └── presentation/
-│       ├── README.md
-│       └── pitch-deck.md     ← Hackathon pitch content
-├── seeder/                   ← Bright Data scraper + Decidim seeder
-├── mcp-server/               ← MCP server (Claude ↔ Decidim)
-└── config/                   ← Nginx vhost, env templates
+│       └── pitch-deck.md  ← Hackathon pitch
+├── seeder/
+│   ├── venv/              ← Python virtualenv
+│   ├── scrape.py          ← Bright Data → raw JSON
+│   ├── seed.py            ← AI generation + Rails runner insertion
+│   ├── requirements.txt
+│   └── data/scraped/      ← 4 JSON files with real Montgomery data
+└── mcp-server/
+    ├── server.py          ← 6 MCP tools for Claude Desktop
+    ├── decidim_client.py  ← GraphQL client (public reads)
+    └── requirements.txt
 ```
 
 ---
@@ -115,11 +116,11 @@ momentum-mgm/
 
 | Day | Date | Focus | Status |
 |---|---|---|---|
-| 1 | Mar 5 | Decidim install + config + DB + Cloudflare | 🔄 In Progress |
-| 2 | Mar 6 | Bright Data scraper + Python seeder | ⏳ |
-| 3 | Mar 7 | MCP Server — all tools + AI classifier | ⏳ |
-| 4 | Mar 8 | Admin bridge polish + Pol.is integration | ⏳ |
-| 5 | Mar 9 | Final seed + demo + submission | ⏳ |
+| 1 | Mar 5 | Decidim install + config + DB + Cloudflare | ✅ Done |
+| 2 | Mar 6 | Bright Data scraper + seeder + 60 proposals | ✅ Done |
+| 3 | Mar 7 | MCP Server — all 6 tools + end-to-end test | 🔄 In Progress |
+| 4 | Mar 8 | Admin bridge polish + branding + Pol.is | ⏳ |
+| 5 | Mar 9 | Final seed refresh + demo + submission | ⏳ |
 
 ---
 
