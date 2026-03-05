@@ -29,26 +29,32 @@ LAYER 1 — PLATFORM (Decidim, native on ARM64)
   Citizens → Decidim UI → proposals, votes, comments
   Admin → Decidim dashboard → full participation management
 
-LAYER 2 — DATA (Bright Data → Python seeder)
-  scrape.py: Bright Data SDK scrapes montgomeryal.gov
-  seed.py: Grok-4-Fast generates proposals → Rails runner inserts into Decidim
-  60 seeded proposals across 10 civic categories (real Montgomery context)
+LAYER 2 — SEEDER (Bright Data → Python → Decidim)
+  scrape.py: Bright Data SDK scrapes montgomeryal.gov + SERP
+  seed.py: Grok-4-Fast generates proposals → Rails runner inserts
+  60+ seeded proposals across 10 civic categories (real Montgomery context)
 
-LAYER 3 — AI (MCP Server, Python stdio)
-  6 tools exposed to Claude Desktop:
-  - get_proposals(category?, limit?)
-  - classify_proposal(text) → Grok-4-Fast via OpenRouter
-  - analyze_trends() → what Montgomery is talking about
-  - recommend_action(topic) → city advisory + 311 routing
-  - get_platform_summary() → full platform snapshot
-  - get_montgomery_context(topic) → scraped civic data lookup
+LAYER 3 — CIVIC DATA LAKE (Bright Data SDK + Census ACS + pgvector)
+  lake.py:   initial collection from Zillow, Yelp, Google Maps, Indeed, Census
+  siphon.py: incremental refresh (daily/weekly/monthly via systemd timer)
+  PostgreSQL civic_data schema + pgvector 1536d embeddings
+  ~5000 records: properties, businesses, reviews, jobs, 14 years of Census data
 
-LAYER 4 — ADMIN BRIDGE (Claude Desktop + MCP)
-  Mayor / city admin opens Claude Desktop
-  → "What are citizens saying about public safety?"
-  → Claude calls get_proposals() + analyze_trends()
-  → Returns analysis + concrete recommendations
-  This is the innovation. No civic platform has this.
+LAYER 4 — AI ADMIN BRIDGE (MCP Server, 9 tools, Claude Desktop)
+  9 tools exposed to Claude Desktop:
+  - get_proposals()              → citizen voice (Decidim)
+  - classify_proposal()         → AI classification
+  - analyze_trends()            → platform analytics
+  - recommend_action()          → city advisory + 311 routing
+  - get_platform_summary()      → full Decidim snapshot
+  - get_montgomery_context()    → scraped city data lookup
+  - get_neighborhood_intelligence() → multi-source neighborhood report
+  - semantic_civic_search()     → pgvector RAG across all data
+  - get_neighborhood_velocity() → trend + projection (improving/declining)
+
+  Mayor asks: "What's happening in West Montgomery?"
+  Claude cross-references: 14 years Census + current Zillow/Yelp/Indeed
+  + citizen proposals + velocity regression → actionable civic intelligence
 ```
 
 ---
@@ -93,21 +99,29 @@ momentum-mgm/
 │   ├── how_it_works.md    ← Full technical explanation (start here)
 │   ├── architecture.md    ← System design + diagrams
 │   ├── backend.md         ← MCP server + seeder details
-│   ├── bugs.md            ← Issues log (20 bugs documented)
+│   ├── data.md            ← DB schema overview
+│   ├── data_lake.md       ← Data lake full plan (sources, schema, siphon)
+│   ├── bugs.md            ← Issues log + architecture divergences
 │   ├── api.md             ← Decidim GraphQL API reference
-│   ├── data.md            ← DB schema
 │   └── presentation/
 │       └── pitch-deck.md  ← Hackathon pitch
+├── database/
+│   └── 002_civic_data_lake.sql  ← civic_data schema + pgvector
 ├── seeder/
 │   ├── venv/              ← Python virtualenv
-│   ├── scrape.py          ← Bright Data → raw JSON
+│   ├── scrape.py          ← Bright Data → raw JSON (city context)
 │   ├── seed.py            ← AI generation + Rails runner insertion
+│   ├── lake.py            ← Data lake initial collection (all sources)
+│   ├── siphon.py          ← Incremental refresh (run by systemd timer)
 │   ├── requirements.txt
 │   └── data/scraped/      ← 4 JSON files with real Montgomery data
-└── mcp-server/
-    ├── server.py          ← 6 MCP tools for Claude Desktop
-    ├── decidim_client.py  ← GraphQL client (public reads)
-    └── requirements.txt
+├── mcp-server/
+│   ├── server.py          ← 9 MCP tools for Claude Desktop
+│   ├── decidim_client.py  ← GraphQL client (public reads)
+│   └── requirements.txt
+└── systemd/
+    ├── momentum-lake.service  ← systemd service for siphon
+    └── momentum-lake.timer    ← daily schedule
 ```
 
 ---
