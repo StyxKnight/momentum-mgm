@@ -245,3 +245,36 @@ Claude Desktop MCP config (`~/.claude/claude_desktop_config.json`):
 ---
 
 *Last updated: 2026-03-05*
+
+---
+
+## Built on Raspberry Pi — A Statement in Itself
+
+This entire project was developed and deployed on a **Raspberry Pi 5 (8GB RAM, NVMe SSD)** running Raspberry Pi OS (Debian Bookworm ARM64) — the developer's primary machine while their main computer was being repaired. All development was done headless in the terminal.
+
+### Why this matters
+
+| Constraint | Reality |
+|---|---|
+| Architecture | ARM64 (aarch64) — not x86, no emulation available |
+| RAM | 8GB — shared with 7 other running services |
+| Storage | NVMe SSD via PCIe |
+| OS | Raspberry Pi OS (Debian Bookworm) — terminal only |
+| Network | Residential network — exposed via Cloudflare tunnel |
+
+### What was built on it
+
+- Ruby 3.3.10 compiled natively from source (~20 min)
+- Decidim 0.31.2 (176 gems) installed and running
+- PostgreSQL 15 + Redis 7 + Nginx (existing infra reused)
+- Docker stack with 7 services running in parallel (separate project)
+- Python MCP server + Bright Data seeder
+- Full CI/CD via Git + GitHub
+
+### The argument
+
+Civic tech infrastructure is often cited as requiring expensive servers, DevOps teams, and months of setup. This project demonstrates that a single person with a $80 computer, open-source tools, and an AI collaborator (Claude) can deploy a production-ready civic participation platform in 5 days.
+
+**If it runs on a Raspberry Pi, it runs anywhere.**
+
+This is the real proof of concept: not just the software, but the radical accessibility of the stack.
