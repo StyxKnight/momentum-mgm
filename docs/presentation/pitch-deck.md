@@ -42,7 +42,11 @@ Built on **Decidim** — the same open-source platform used by:
 - Quebec City and Montreal
 - Brazil's national government (36,000 proposals processed with AI)
 
-Citizens submit proposals in plain language. The AI classifies them against Mayor Reed's stated priorities. The platform shows what Montgomery is actually talking about.
+Citizens submit proposals in plain language. The AI classifies them across **10 official civic categories** — the same taxonomy used in 311 systems worldwide: Infrastructure, Environment, Housing, Public Safety, Transportation, Health, Education, Economy, Parks & Culture, and Governance.
+
+The platform shows what Montgomery is actually talking about.
+
+**Critical distinction:** Montgomery already has 311 for *reactive* requests (report a pothole). Momentum MGM is the *proactive* complement — proposals, votes, participation. A Momentum proposal can *trigger* a 311 request. 311 data can *enrich* Momentum. Two halves of a complete civic system.
 
 And the city administrator? They talk to their city through Claude.
 
