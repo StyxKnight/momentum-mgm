@@ -27,7 +27,41 @@ Running log of every significant issue encountered during the hackathon: root ca
 
 ## Resolved Issues
 
-*None yet — see entries as they are added.*
+### [BUG-001] Shakapacker manifest missing on first boot
+- **Date:** 2026-03-05
+- **Severity:** High
+- **Status:** Fixed
+- **Symptom:** Decidim server returns 500 on all routes — `Shakapacker::Manifest::MissingEntryError`
+- **Root Cause:** webpack/shakapacker assets were never compiled. Rails expects a compiled `manifest.json` in `public/decidim-packs/` before it can serve any page.
+- **Fix:** Run `bundle exec bin/shakapacker` once after install to compile all frontend assets (~40 sec on Pi ARM64).
+- **Lesson:** Always compile assets before first boot. In production use `RAILS_ENV=production bundle exec bin/shakapacker` and serve from CDN or Nginx static files.
+
+### [BUG-002] rbenv install fails silently in background shell
+- **Date:** 2026-03-05
+- **Severity:** High
+- **Status:** Fixed
+- **Symptom:** `rbenv install 3.3.6` run via `nohup ... &` — process starts but Ruby never appears in `~/.rbenv/versions/`
+- **Root Cause:** Background shell did not inherit the correct PATH and rbenv init environment. The install process exited silently without writing to the version directory.
+- **Fix:** Run `rbenv install` in a foreground shell with `export PATH="$HOME/.rbenv/bin:$PATH" && eval "$(rbenv init -)"` explicitly set first.
+- **Lesson:** Never background rbenv/ruby install. Run foreground. Takes ~20 min on ARM64 but is reliable.
+
+### [BUG-003] PostgreSQL not accessible from host (no port binding)
+- **Date:** 2026-03-05
+- **Severity:** Medium
+- **Status:** Fixed (non-issue)
+- **Symptom:** `rails db:migrate` fails — cannot connect to `localhost:5432`
+- **Root Cause:** Assumed Docker PostgreSQL was the only instance. A native PostgreSQL 15 was already running on `127.0.0.1:5432` on the Pi.
+- **Fix:** Use `127.0.0.1:5432` (not `::1`). Native PostgreSQL is the correct target — create `momentum` database there via `sudo -u postgres psql`.
+- **Lesson:** Check `ss -tlnp | grep 5432` before assuming PostgreSQL config.
+
+### [BUG-004] Decidim generated app targets wrong Ruby version
+- **Date:** 2026-03-05
+- **Severity:** Low
+- **Status:** Fixed
+- **Symptom:** `rbenv: version '3.3.4' is not installed` when running any rails command inside momentum-app
+- **Root Cause:** `decidim` generator writes `.ruby-version` with the version it was built against (3.3.4), not the installed version (3.3.10).
+- **Fix:** `echo "3.3.10" > .ruby-version`
+- **Lesson:** Always check `.ruby-version` after `decidim` app generation.
 
 ---
 
