@@ -60,7 +60,7 @@ City admin opens Claude Desktop and asks:
 > *"What are citizens saying about public safety this week?"*
 
 Claude calls our MCP server, queries Decidim, and responds:
-> *"23 proposals this week. Top cluster: 'Police Response Time in West Montgomery' (11 proposals, high urgency). Second cluster: 'Street Lighting on Southern Blvd' (8 proposals). Recommend escalating to MPD and Public Works. Aligns directly with Reed Priority #1."*
+> *"23 proposals this week. Top cluster: 'Police Response Time in West Montgomery' (11 proposals, high urgency). Second cluster: 'Street Lighting on Southern Blvd' (8 proposals). Recommend escalating to MPD and Public Works. Category: Public Safety — 311 routing suggested."*
 
 This is Model Context Protocol (MCP) — Anthropic's open standard for connecting AI to external systems. We built the bridge between Claude and civic data.
 

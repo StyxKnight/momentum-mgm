@@ -51,10 +51,15 @@ LAYER 4 — AI ADMIN BRIDGE (MCP Server, 9 tools, Claude Desktop)
   - get_neighborhood_intelligence() → multi-source neighborhood report
   - semantic_civic_search()     → pgvector RAG across all data
   - get_neighborhood_velocity() → trend + projection (improving/declining)
+  - find_solutions()            → federal programs + comparable cities
+                                   + Montgomery-specific recommendations
 
-  Mayor asks: "What's happening in West Montgomery?"
-  Claude cross-references: 14 years Census + current Zillow/Yelp/Indeed
-  + citizen proposals + velocity regression → actionable civic intelligence
+  Full governance loop:
+  detect (velocity) → understand (intelligence) → find solutions → act
+
+  Mayor asks: "What's happening in West Montgomery and what do we do?"
+  Claude: 14yr Census trend + Zillow/Yelp/Indeed + citizen proposals
+        + velocity regression + federal grant opportunities → act
 ```
 
 ---

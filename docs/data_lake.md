@@ -380,6 +380,52 @@ Output: {
 Computed via linear regression on Census ACS 2010-2024 + Bright Data refresh.
 Cross-referenced with Decidim proposal volume trend — rising proposals = citizens sensing deterioration before metrics catch up.
 
+### Tool 10 — find_solutions(problem, neighborhood, budget_constraint=True)
+```
+Input:  problem description (free text or structured from velocity output)
+        neighborhood name
+        budget_constraint: bool (default True — only realistic options)
+
+Output: {
+  problem_summary:    "West Montgomery: housing vacancy +31%, income -18% over 10yr",
+  federal_programs: [
+    { name: "HUD Choice Neighborhoods", eligible: true, amount: "up to $30M",
+      deadline: "2026-06-01", fit_score: 0.91 },
+    { name: "CDBG Entitlement Grant", eligible: true, amount: "$2-5M/yr",
+      deadline: "ongoing", fit_score: 0.87 },
+    ...
+  ],
+  comparable_cities: [
+    { city: "Birmingham AL", problem: "similar vacancy 2018",
+      solution: "Land bank + rehab program", outcome: "-18% vacancy in 3yr" },
+    ...
+  ],
+  montgomery_specific: [
+    "Aligns with Housing & Neighborhoods civic category (blight, vacancy)",
+    "Public Works Dept has active blight removal budget FY2026",
+    "12 active citizen proposals on this topic (Decidim)"
+  ],
+  recommended_actions: [
+    { action: "...", feasibility: "high", impact: "high", timeline: "6mo",
+      cost_estimate: "$X", funding_source: "CDBG" },
+    ...
+  ],
+  total_estimated_cost: "$2.4M",
+  federal_fundable_pct: "70%",
+  urgency_note: "Velocity at -8.2/yr — window for intervention: 18 months"
+}
+```
+
+Sources queried at call time (live, not pre-cached):
+- HUD grants database (grants.gov) via OpenRouter web search
+- What comparable Alabama/Southern cities did in similar situations
+- Montgomery FY2026 budget (Open Finance portal)
+- Active Decidim proposals for context + citizen voice
+- Civic category alignment (our 10 categories → maps to city departments + 311)
+
+This closes the full governance loop:
+**detect** (velocity) → **understand** (intelligence) → **find solutions** → **act**
+
 ---
 
 ## Civic Health Score

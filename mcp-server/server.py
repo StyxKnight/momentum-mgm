@@ -83,7 +83,7 @@ async def get_proposals(category: str = None, limit: int = 20) -> str:
 async def classify_proposal(text: str) -> str:
     """
     Classify a citizen proposal using AI (Gemini Flash).
-    Returns category aligned with Mayor Reed's 5 priorities, summary, confidence, keywords.
+    Returns category (one of 10 civic categories), summary, confidence, keywords.
     """
     prompt = f"""You are a civic AI assistant for Montgomery, Alabama.
 

@@ -86,6 +86,8 @@ Momentum MGM is a civic intelligence platform built on three layers:
 │  - get_neighborhood_intelligence(neighborhood) → multi-source      │
 │  - semantic_civic_search(query, neighborhood?) → pgvector RAG      │
 │  - get_neighborhood_velocity(neighborhood?) → trend + projection   │
+│  - find_solutions(problem, neighborhood) → federal programs,       │
+│    comparable cities, Montgomery-specific recommendations          │
 └──────────┬──────────────────────────────────────────────────────────┘
            │
            ▼
@@ -121,7 +123,7 @@ Momentum MGM is a civic intelligence platform built on three layers:
 - `seeder/lake.py` — initial data collection (Zillow, Yelp, GMaps, Indeed, Census)
 - `seeder/siphon.py` — incremental refresh pipeline
 - systemd timer for automated siphon
-- MCP tools 7-9 (neighborhood intelligence, semantic search, velocity)
+- MCP tools 7-10 (neighborhood intelligence, semantic search, velocity, find_solutions)
 - Claude Desktop end-to-end test
 
 ## What Is NOT Yet Built (planned Day 4-5)
@@ -187,7 +189,8 @@ ADMIN QUERY (via Claude Desktop):
   → semantic_civic_search: pgvector similarity across all sources
   → get_neighborhood_velocity: regression on Census ACS time series
   → Claude synthesizes: history + present + velocity + projection
-  → Admin gets actionable civic intelligence
+  → find_solutions: queries federal grants + comparable cities live
+  → Admin gets actionable civic intelligence with concrete next steps
 ```
 
 ---

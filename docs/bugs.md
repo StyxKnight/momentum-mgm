@@ -272,4 +272,16 @@ Recorded during Day 2 full doc audit. These are intentional deviations from orig
 
 ---
 
+## Recurring Patterns to Watch
+
+### [PATTERN-001] "Mayor Reed priorities" creep
+- **First occurrence:** 2026-03-05 (Day 3 planning session)
+- **Pattern:** AI assistants (Claude included) tend to re-introduce "Mayor Reed's 5 priorities" or "Reed Priority #1/#2" into code, docs, and tool descriptions — even after being explicitly corrected.
+- **Why it happens:** Training data likely contains many Decidim/civic platform examples that reference mayor priorities. The association is strong.
+- **Correct behavior:** Always use the 10 civic categories. No mayor names in taxonomy. Categories map to city departments and 311, not to any individual politician.
+- **Search for:** `reed priority`, `reed_priority`, `Reed's 5`, `Priority #`, `mayor reed priority` — any of these in code or docs is wrong.
+- **Exception:** `mayor_priorities.json` scraped data file and `how_it_works.md`/`bugs.md` explanations are correct — they reference Reed historically to explain WHY we chose 10 categories instead.
+
+---
+
 *Last updated: 2026-03-05*

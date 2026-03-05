@@ -166,9 +166,47 @@ async def get_platform_summary() -> str:
 @mcp.tool()
 async def get_montgomery_context(topic: str) -> str:
     """Query scraped Montgomery civic data (city pages, mayor priorities, 311 data)."""
+
+# ── DATA LAKE TOOLS (Days 3-4) ─────────────────────────────────────────────
+
+@mcp.tool()
+async def get_neighborhood_intelligence(neighborhood: str) -> str:
+    """
+    Full multi-source report on a Montgomery neighborhood.
+    Queries: Census 2010-2024, Zillow, Yelp, Indeed, Decidim proposals.
+    Returns: economic trends, real estate, business health, jobs, civic health score.
+    """
+
+@mcp.tool()
+async def semantic_civic_search(query: str, neighborhood: str = None) -> str:
+    """
+    Semantic search across all civic data via pgvector RAG.
+    Searches: proposals, properties, businesses, reviews, jobs, census records.
+    Returns top 10 results ranked by cosine similarity.
+    """
+
+@mcp.tool()
+async def get_neighborhood_velocity(neighborhood: str = None) -> str:
+    """
+    Trend analysis — is this neighborhood improving or declining, and how fast?
+    Linear regression on Census ACS 2010-2024 + Bright Data indicators.
+    Returns: velocity score, trajectory, 2-year projection, urgency level.
+    If neighborhood=None, ranks all Montgomery neighborhoods by urgency.
+    """
+
+@mcp.tool()
+async def find_solutions(problem: str, neighborhood: str, budget_constraint: bool = True) -> str:
+    """
+    Given a civic problem and neighborhood, find concrete actionable solutions.
+    Searches live: federal grant programs (HUD, CDBG, EPA), comparable cities,
+    Montgomery FY2026 budget alignment, civic category alignment.
+    Returns: ranked recommendations with cost estimates and funding sources.
+    Closes the governance loop: detect → understand → find solutions → act.
+    """
 ```
 
 > **Note:** `get_clusters` and `create_proposal` tools were in the original plan but do not exist. (See DIV-005 in bugs.md)
+> **10 tools total:** 6 existing (Decidim layer) + 4 new (data lake layer: intelligence, search, velocity, solutions)
 
 ### GraphQL Client (decidim_client.py)
 Used for all read operations. GraphQL API is public — no auth needed.
