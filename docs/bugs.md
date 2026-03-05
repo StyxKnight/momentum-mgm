@@ -21,7 +21,35 @@ Running log of every significant issue encountered during the hackathon: root ca
 
 ## Active Issues
 
-*None yet.*
+- **iptables rule not persistent** — port 3000 rule lost on reboot. Needs `/etc/iptables/rules.v4` entry.
+### [BUG-005] config.hosts inside conditional block — never executed
+- **Date:** 2026-03-05
+- **Severity:** High
+- **Status:** Fixed
+- **Symptom:** `ActionDispatch::HostAuthorization` blocks `mgm.styxcore.dev` even after adding config.hosts
+- **Root Cause:** The `config.hosts` lines were placed inside `if ENV["RAILS_BOOST_PERFORMANCE"]` block. Since that env var isn't set, they never ran.
+- **Fix:** Move `config.hosts` lines outside the conditional, directly in the `Rails.application.configure` block.
+- **Lesson:** Always verify indentation/scope when editing Rails environment configs.
+
+### [BUG-006] Decidim Organization host mismatch
+- **Date:** 2026-03-05
+- **Severity:** High
+- **Status:** Fixed
+- **Symptom:** Decidim returns 403/exception — organization lookup fails for `mgm.styxcore.dev`
+- **Root Cause:** Decidim seeds the Organization with `host: localhost`. When accessed via public domain, the lookup fails.
+- **Fix:** `UPDATE decidim_organizations SET host = 'mgm.styxcore.dev' WHERE host = 'localhost';`
+- **Lesson:** After any domain change, update the Organization host in DB.
+
+### [BUG-007] Docker containers cannot reach host ports (iptables)
+- **Date:** 2026-03-05
+- **Severity:** Medium
+- **Status:** Fixed
+- **Symptom:** Nginx container times out trying to reach `172.21.0.1:3000` (Decidim on host)
+- **Root Cause:** Default Docker iptables rules block container → host connections on non-standard ports.
+- **Fix:** `sudo iptables -I INPUT -s 172.21.0.0/16 -p tcp --dport 3000 -j ACCEPT`
+- **Lesson:** iptables rule is not persistent across reboots. Add to `/etc/iptables/rules.v4` or a startup script.
+
+
 
 ---
 
