@@ -1,0 +1,55 @@
+{
+  "page_content": "<!DOCTYPE html><html lang=\"en-us\"><head>\n    <title>City 311</title><meta name=\"twitter:title\" content=\"City 311\"><meta property=\"og:title\" content=\"City 311\"><meta name=\"description\" content=\"An application used for showing non-emergency issues and complaints and status.\"><meta name=\"twitter:description\" content=\"An application used for showing non-emergency issues and complaints and status.\"><meta property=\"og:description\" content=\"An application used for showing non-emergency issues and complaints and status.\"><meta name=\"twitter:image\" content=\"https://www.arcgis.com/sharing/rest/content/items/8239fbe2a3114dbf96382687ada4c6b9/resources/CityLogo.png\"><meta property=\"og:image\" content=\"https://www.arcgis.com/sharing/rest/content/items/8239fbe2a3114dbf96382687ada4c6b9/resources/CityLogo.png\"><meta name=\"twitter:card\" content=\"summary\"><meta property=\"og:url\" content=\"https://city-311-citymgm.hub.arcgis.com/\"><meta property=\"og:type\" content=\"website\">\n    <meta charset=\"utf-8\">\n    <meta name=\"google-site-verification\" content=\"V9SzvB895BKr2ff7JVvaJQM1CIgPqOL5FPooX1aqENo\">\n    <meta name=\"msvalidate.01\" content=\"217F0EED65C5B131219477CE2CEAAF8E\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n    <script>\n      (function () {\n        // check for unsupported browsers\n        function isIE () {\n          return (\n            (navigator.appName === 'Microsoft Internet Explorer') ||\n            ((navigator.appName === 'Netscape') && (new RegExp('Trident/.*rv:([0-9]{1,}[.0-9]{0,})').exec(navigator.userAgent) != null))\n          );\n        }\n        function isEdge () {\n          return navigator.userAgent.toLowerCase().includes('edge');\n        }\n        if (isIE() || isEdge()) {\n          window.location.replace('./unsupported.html');\n        }\n      })();\n    </script>\n    \n<meta name=\"activation-engine/config/environment\" content=\"%7B%22modulePrefix%22%3A%22activation-engine%22%2C%22environment%22%3A%22production%22%2C%22ember-do-forms%22%3A%7B%22defaultClasses%22%3A%7B%22field%22%3A%5B%22field%22%5D%2C%22label%22%3A%5B%22label%22%5D%2C%22control%22%3A%5B%22control%22%5D%2C%22feedback%22%3A%5B%22feedback%22%5D%2C%22hint%22%3A%5B%22hint%22%5D%7D%2C%22validationClasses%22%3A%7B%22fieldSuccess%22%3A%5B%22field-success%22%5D%2C%22fieldError%22%3A%5B%22field-error%22%5D%2C%22controlSuccess%22%3A%5B%22control-success%22%5D%2C%22controlError%22%3A%5B%22control-error%22%5D%7D%7D%7D\">\n<meta name=\"community-engine/config/environment\" content=\"%7B%22modulePrefix%22%3A%22community-engine%22%2C%22environment%22%3A%22production%22%7D\">\n<meta name=\"content-library-engine/config/environment\" content=\"%7B%22modulePrefix%22%3A%22content-library-engine%22%2C%22environment%22%3A%22production%22%2C%22ember-do-forms%22%3A%7B%22defaultClasses%22%3A%7B%22field%22%3A%5B%22field%22%5D%2C%22label%22%3A%5B%22label%22%5D%2C%22control%22%3A%5B%22control%22%5D%2C%22feedback%22%3A%5B%22feedback%22%5D%2C%22hint%22%3A%5B%22hint%22%5D%7D%2C%22validationClasses%22%3A%7B%22fieldSuccess%22%3A%5B%22field-success%22%5D%2C%22fieldError%22%3A%5B%22field-error%22%5D%2C%22controlSuccess%22%3A%5B%22control-success%22%5D%2C%22controlError%22%3A%5B%22control-error%22%5D%7D%7D%7D\">\n<meta name=\"events-engine/config/environment\" content=\"%7B%22modulePrefix%22%3A%22events-engine%22%2C%22environment%22%3A%22production%22%2C%22ember-do-forms%22%3A%7B%22defaultClasses%22%3A%7B%22field%22%3A%5B%22field%22%5D%2C%22label%22%3A%5B%22label%22%5D%2C%22control%22%3A%5B%22control%22%5D%2C%22feedback%22%3A%5B%22feedback%22%5D%2C%22hint%22%3A%5B%22hint%22%5D%7D%2C%22validationClasses%22%3A%7B%22fieldSuccess%22%3A%5B%22field-success%22%5D%2C%22fieldError%22%3A%5B%22field-error%22%5D%2C%22controlSuccess%22%3A%5B%22control-success%22%5D%2C%22controlError%22%3A%5B%22control-error%22%5D%7D%7D%7D\">\n<meta name=\"feedback-engine/config/environment\" content=\"%7B%22modulePrefix%22%3A%22feedback-engine%22%2C%22environment%22%3A%22production%22%7D\">\n<meta name=\"initiative-editor-engine/config/environment\" content=\"%7B%22modulePrefix%22%3A%22initiative-editor-engine%22%2C%22environment%22%3A%22production%22%7D\">\n<meta name=\"layout-editor-engine/config/environment\" content=\"%7B%22modulePrefix%22%3A%22layout-editor-engine%22%2C%22environment%22%3A%22production%22%2C%22ember-do-forms%22%3A%7B%22defaultClasses%22%3A%7B%22field%22%3A%5B%22field%22%5D%2C%22label%22%3A%5B%22label%22%5D%2C%22control%22%3A%5B%22control%22%5D%2C%22feedback%22%3A%5B%22feedback%22%5D%2C%22hint%22%3A%5B%22hint%22%5D%7D%2C%22validationClasses%22%3A%7B%22fieldSuccess%22%3A%5B%22field-success%22%5D%2C%22fieldError%22%3A%5B%22field-error%22%5D%2C%22controlSuccess%22%3A%5B%22control-success%22%5D%2C%22controlError%22%3A%5B%22control-error%22%5D%7D%7D%7D\">\n<meta name=\"overview-engine/config/environment\" content=\"%7B%22modulePrefix%22%3A%22overview-engine%22%2C%22environment%22%3A%22production%22%7D\">\n<meta name=\"solutions-engine/config/environment\" content=\"%7B%22modulePrefix%22%3A%22solutions",
+  "search_results": [
+    {
+      "title": "Report An Issue to 311 | City of Montgomery, AL",
+      "url": "https://www.montgomeryal.gov/residents/report-an-issue",
+      "description": "311 is available for assistance with non-emergency City Services such as reporting graffiti, overgrown grass or potholes, finding out where to vote, ...Read more"
+    },
+    {
+      "title": "311 Service Requests | City of Montgomery",
+      "url": "https://opendata.montgomeryal.gov/datasets/311-service-requests",
+      "description": "Our 311 agents are ready to help. Report an issue online by using the form below or call 334-625-INFO (4636) from your phone.Read more"
+    },
+    {
+      "title": "MC311 Answering to You - Montgomery County, MD",
+      "url": "https://www.montgomerycountymd.gov/mc311/",
+      "description": "You can reach MC311 by calling 311 in the County or 240-777-0311, 711 for MD Relay TTY, from anywhere, Monday - Friday 7 am – 7 pm.Read more"
+    },
+    {
+      "title": "City of Montgomery, Alabama Government",
+      "url": "https://www.facebook.com/montgomeryalabama/posts/wondering-what-counts-as-a-nuisance-violation-in-montgomery-%EF%B8%8F-watch-to-see-how-t/1253999806774679/",
+      "description": "Wondering what counts as a nuisance violation in Montgomery? 🏘️ Watch to see how to report issues through 311 and follow the process from start ...Read more"
+    },
+    {
+      "title": "Report... | City of Montgomery, AL",
+      "url": "https://www.montgomeryal.gov/how-do-i/report",
+      "description": "File a complaint against a member of the City's personnel. Report an Issue to 311. Report a non-emergency, City Service issue through this page. 103 North ...Read more"
+    },
+    {
+      "title": "Knowledge Base Categories - Montgomery, AL",
+      "url": "https://montgomeryal.qscend.com/311/knowledgebase/browse",
+      "description": "Knowledge Base Categories · Basketball Goal on City Right-of-Way · Ditch Issues · Ditch Flooding · Request Cleaning · Fence/Gate Issues · Gate Open · Inlet Issues.Read more"
+    },
+    {
+      "title": "FAQ List | City of Montgomery, AL",
+      "url": "https://www.funinmontgomery.com/riverboat/parksrec-advanced-components/faq-list",
+      "description": "Do you have a membership that includes the Museum? Where do I request an accident report? Can I make a donation through my membership? Where do I report ...Read more"
+    },
+    {
+      "title": "Submit or Check Status of an Existing Service Request - MC311",
+      "url": "https://www3.montgomerycountymd.gov/311/SolutionView.aspx?SolutionId=1-6IAGGJ",
+      "description": "Report ComplaintsClick enter key to open sub-menu tier. File Consumer Complaints · Cable Service Complaints · Fire Code Violations · Ride On ...Read more"
+    },
+    {
+      "title": "Need to report a pothole, missed trash pickup, or another non ...",
+      "url": "https://www.facebook.com/montgomeryalabama/videos/need-to-report-a-pothole-missed-trash-pickup-or-another-non-emergency-issue-call/1092775369369893/",
+      "description": "Need to report a pothole, missed trash pickup, or another non-emergency issue? Call 311 or 334-625-INFO (4636) to get connected and get it ..."
+    },
+    {
+      "title": "Program: 311 Montgomery CITY SERVICES - icarol.info",
+      "url": "https://www.icarol.info/ResourceView2.aspx?org=84123&agencynum=39171373",
+      "description": "City of Montgomery oversees all municipal services. All departments call be reached by dialing 3-1-1 or 334-625-4636.Read more"
+    }
+  ]
+}
