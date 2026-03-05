@@ -169,4 +169,51 @@ Running log of every significant issue encountered during the hackathon: root ca
 
 ---
 
+### [BUG-016] Decidim API 302 redirect when queried via localhost
+- **Date:** 2026-03-05
+- **Severity:** High
+- **Status:** Fixed
+- **Symptom:** POST to `http://localhost:3000/api` returns 302 redirect to `/system/`
+- **Root Cause:** Decidim looks up the Organization by the request host. `localhost` doesn't match the org host (`mgm.styxcore.dev`), so it redirects to system setup.
+- **Fix:** Always query the API via the public URL: `https://mgm.styxcore.dev/api`. Update `DECIDIM_URL` in `.env` accordingly.
+- **Lesson:** Never use localhost for Decidim API calls when org host is a public domain.
+
+### [BUG-017] Decidim Organization created with fake multilingual seed data
+- **Date:** 2026-03-05
+- **Severity:** Medium
+- **Status:** Fixed
+- **Symptom:** `org.name` returns a hash with 40+ locales of fake company names ("Flatley and Sons", etc.)
+- **Root Cause:** `rails db:seed` populates the org with Faker data across all supported locales.
+- **Fix:** `org.update_columns(name: {"en" => "Momentum MGM"}, ...)` — direct SQL, bypasses reindex callback that crashes on nil seed data.
+- **Lesson:** After `rails db:seed`, always reset org name/host before doing anything else. Use `update_columns` not `save!`.
+
+### [BUG-018] `Decidim::Coauthorship` model — wrong attribute names
+- **Date:** 2026-03-05
+- **Severity:** Medium
+- **Status:** Fixed
+- **Symptom:** `proposal.coauthorships.build(author: admin, organization: org)` raises `UnknownAttributeError`
+- **Root Cause:** `Decidim::Coauthorship` uses raw FK columns, not ActiveRecord associations in the build call. Actual columns: `decidim_author_id`, `decidim_author_type`. No `organization` column.
+- **Fix:** `proposal.coauthorships.build(decidim_author_id: admin.id, decidim_author_type: admin.class.name)`
+- **Lesson:** Always introspect with `Model.column_names` before assuming attribute names in Decidim models.
+
+### [BUG-019] Rails runner script in heredoc — `save!` backslash escape issue
+- **Date:** 2026-03-05
+- **Severity:** Low
+- **Status:** Fixed
+- **Symptom:** `rails runner` fails with `syntax error, unexpected backslash` on `save!` or `update!`
+- **Root Cause:** When passing Ruby code inline via shell (single-quoted heredoc or string), the `!` in method names like `save!` gets interpreted by the shell in some contexts.
+- **Fix:** Write Ruby scripts to a `.rb` file first (`/tmp/script.rb`), then call `rails runner /tmp/script.rb`. Never pass complex Ruby inline via shell string.
+- **Lesson:** Always use file-based Rails runner for anything beyond a one-liner.
+
+### [BUG-020] google-genai free tier limit = 0 on new AI Studio key
+- **Date:** 2026-03-05
+- **Severity:** Medium
+- **Status:** Worked around
+- **Symptom:** `429 RESOURCE_EXHAUSTED — limit: 0` immediately on first API call
+- **Root Cause:** Google AI Studio free keys have `limit: 0` when the associated GCP project doesn't have billing enabled. The key exists but the quota is zero.
+- **Fix:** Use OpenRouter as primary AI provider (already configured). Gemini kept as fallback for when billing is eventually enabled.
+- **Lesson:** Google AI Studio free keys require billing activated on GCP project. OpenRouter is a better default for hackathon use — one key, multiple models, pay-per-use.
+
+---
+
 *Last updated: 2026-03-05*
