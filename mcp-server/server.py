@@ -5,12 +5,15 @@ Bridges Claude Desktop ↔ Decidim civic platform
 import os
 import json
 import asyncio
+from pathlib import Path
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from openai import AsyncOpenAI
 from decidim_client import graphql
 
 load_dotenv()
+
+SCRAPED_DATA_DIR = Path(__file__).parent.parent / "seeder" / "data" / "scraped"
 
 mcp = FastMCP("momentum-mgm")
 openrouter = AsyncOpenAI(
@@ -208,9 +211,84 @@ async def get_platform_summary() -> str:
         "total_proposals": trends["total_proposals"],
         "top_issues": trends["top_by_votes"],
         "categories": list(CATEGORIES.keys()),
-        "reed_priorities": {v["label"]: v["reed_priority"] for v in CATEGORIES.values()},
+        "categories_detail": {k: {"label": v["label"], "color": v["color"]} for k, v in CATEGORIES.items()},
     }
     return json.dumps(summary, ensure_ascii=False, indent=2)
+
+
+# ── TOOL 6 ─────────────────────────────────────────────────────────────────────
+@mcp.tool()
+async def get_montgomery_context(topic: str) -> str:
+    """
+    Query real Montgomery civic data for context on any topic.
+    Sources: city news, mayor priorities, 311 data, category searches.
+    Example: topic='public safety', topic='housing blight', topic='Mayor Reed 2026'
+    Returns relevant excerpts from scraped Montgomery sources.
+    """
+    topic_lower = topic.lower()
+    results = []
+
+    # Load all scraped data files
+    files = {
+        "mayor_priorities": SCRAPED_DATA_DIR / "mayor_priorities.json",
+        "category_searches": SCRAPED_DATA_DIR / "category_searches.json",
+        "city_pages": SCRAPED_DATA_DIR / "city_pages.json",
+        "311_data": SCRAPED_DATA_DIR / "311_data.json",
+    }
+
+    for source_name, fpath in files.items():
+        if not fpath.exists():
+            continue
+        with open(fpath) as f:
+            data = json.load(f)
+
+        # Search results — match by title/description keywords
+        if source_name == "category_searches":
+            for category, items in data.items():
+                if any(w in topic_lower for w in category.split("_")):
+                    for r in items[:3]:
+                        results.append({
+                            "source": f"Montgomery civic data ({category})",
+                            "title": r.get("title", ""),
+                            "excerpt": r.get("description", "")[:300],
+                            "url": r.get("url", ""),
+                        })
+
+        elif source_name == "mayor_priorities":
+            for r in data.get("search_results", []):
+                text = (r.get("title", "") + " " + r.get("description", "")).lower()
+                if any(w in text for w in topic_lower.split()):
+                    results.append({
+                        "source": "Mayor Reed statements",
+                        "title": r.get("title", ""),
+                        "excerpt": r.get("description", "")[:300],
+                        "url": r.get("url", ""),
+                    })
+
+        elif source_name == "city_pages":
+            for page_key, page_data in data.items():
+                content = page_data.get("content", "").lower()
+                if any(w in content for w in topic_lower.split()):
+                    excerpt = page_data.get("content", "")[:400]
+                    results.append({
+                        "source": f"City of Montgomery — {page_data.get('description', page_key)}",
+                        "title": page_data.get("description", page_key),
+                        "excerpt": excerpt,
+                        "url": page_data.get("url", ""),
+                    })
+
+    if not results:
+        return json.dumps({
+            "topic": topic,
+            "results": [],
+            "note": "No direct matches in scraped data. Run scrape.py to refresh."
+        }, indent=2)
+
+    return json.dumps({
+        "topic": topic,
+        "results": results[:6],  # top 6 most relevant
+        "sources_searched": list(files.keys()),
+    }, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":

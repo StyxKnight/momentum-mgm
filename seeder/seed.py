@@ -125,10 +125,12 @@ proposals_data.each do |entry|
     proposal = Decidim::Proposals::Proposal.new(
       component: component,
       title: { 'en' => p['title'] },
-      body: { 'en' => p['body'] },
-      published_at: Time.current
+      body: { 'en' => p['body'] }
     )
-    proposal.add_coauthorships_from_model(admin)
+    proposal.coauthorships.build(
+      decidim_author_id: admin.id,
+      decidim_author_type: admin.class.name
+    )
     if proposal.save
       proposal.update_columns(published_at: Time.current)
       created += 1
