@@ -1,0 +1,11 @@
+[Unit]
+Description=Momentum MGM — Data Lake Siphon Timer
+Requires=momentum-lake.service
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

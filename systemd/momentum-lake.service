@@ -1,0 +1,14 @@
+[Unit]
+Description=Momentum MGM — Data Lake Siphon
+After=network.target postgresql.service
+
+[Service]
+Type=oneshot
+User=styxknight
+WorkingDirectory=/home/styxknight/momentum-mgm/seeder
+ExecStart=/home/styxknight/momentum-mgm/seeder/venv/bin/python3 /home/styxknight/momentum-mgm/seeder/siphon.py
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

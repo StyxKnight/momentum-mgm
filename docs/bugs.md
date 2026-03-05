@@ -274,6 +274,12 @@ Recorded during Day 2 full doc audit. These are intentional deviations from orig
 
 ## Recurring Patterns to Watch
 
+### [PATTERN-002] Invented census tract numbers
+- **First occurrence:** 2026-03-05 (Day 3 lake.py build)
+- **Pattern:** AI invents plausible-looking census tract numbers (0101.00, 0102.00...) that don't match reality. Montgomery County AL has 71 real tracts numbered 1–61 with subdivisions (22.01, 22.02, 29.01, etc.), confirmed via Census API (state=01, county=101).
+- **Fix:** Never hardcode census tract → neighborhood mappings. Populate dynamically: tract IDs from Census API responses, neighborhood names from Nominatim reverse geocoding (lat/lon → suburb).
+- **Search for:** any hardcoded INSERT with census tract numbers in SQL files.
+
 ### [PATTERN-001] "Mayor Reed priorities" creep
 - **First occurrence:** 2026-03-05 (Day 3 planning session)
 - **Pattern:** AI assistants (Claude included) tend to re-introduce "Mayor Reed's 5 priorities" or "Reed Priority #1/#2" into code, docs, and tool descriptions — even after being explicitly corrected.
