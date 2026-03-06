@@ -52,9 +52,10 @@ Decidim (live):
 | Zillow Properties | `ZillowProperties` | `gd_lfqkr8wm13ixtbd8f5` | address, price, vacancy, sqft, lat/lon | monthly |
 | Yelp Businesses | `YelpBusinesses` | `gd_lgugwl0519h1p14rwk` | name, category, is_closed, rating, review_count, lat/lon | weekly |
 | Yelp Reviews | `YelpReviews` | via SDK | business_id, rating, text, date | weekly |
-| Google Maps Reviews | `GoogleMapsReviews` | `gd_luzfs1dn2oa0teb81` | place_name, address, rating, review, review_date | weekly |
-| Indeed Jobs | `IndeedJobs` | `gd_l4dx9j9sscpvs7no2` | title, company, salary, location, posted_at | daily |
-| Glassdoor Companies | `GlassdoorCompanies` | via SDK | name, rating, industry, size, location | weekly |
+| Google Maps Reviews | `GoogleMapsReviews` | `gd_luzfs1dn2oa0teb81` | place_name, address, rating, review, review_date | weekly | ⚠️ PARKED — dataset URL-based (place URLs requises), voir BUG-025 |
+| Indeed Jobs | `IndeedJobs` | `gd_l4dx9j9sscpvs7no2` | title, company, salary, location, posted_at | daily | ⚠️ PARKED — dataset URL-based (/viewjob URLs requises), voir BUG-024 |
+
+> **Bright Data réel collecté:** Zillow ✅ 500 props, Yelp ✅ 500 bizs. Google Maps et Indeed = 0 records (datasets URL-based incompatibles avec filtre géo). Voir bugs.md BUG-024/025.
 
 All filtered to: **city = "Montgomery", state = "AL"** (or "Alabama")
 
@@ -458,7 +459,7 @@ Content text embedded per record type:
 | Census | `"{neighborhood} in {year}: median income ${value}, poverty {pov}%, vacancy {vac}%"` |
 | Proposal | `"{title}: {body[:200]}"` (from Decidim, embedded at query time) |
 
-Embedding model: `text-embedding-3-small` via OpenAI API (1536 dimensions, $0.02/1M tokens).
+Embedding model: `gemini-embedding-001` via Google GenAI API (3072 dimensions, Matryoshka). Voir DECISION-001 dans architecture.md.
 
 ---
 
@@ -469,14 +470,14 @@ Embedding model: `text-embedding-3-small` via OpenAI API (1536 dimensions, $0.02
 | Zillow | ~500 | ~$1.25 | ~$0.01 | ~$1.26 |
 | Yelp businesses | ~1000 | ~$2.50 | ~$0.02 | ~$2.52 |
 | Yelp reviews | ~2000 | ~$5.00 | ~$0.04 | ~$5.04 |
-| Google Maps | ~1000 | ~$2.50 | ~$0.02 | ~$2.52 |
-| Indeed | ~200 | ~$0.50 | ~$0.01 | ~$0.51 |
-| Census ACS | ~340 rows | FREE | ~$0.001 | ~$0.001 |
-| **Total initial** | | | | **~$12** |
-| Monthly refresh | | | | **~$5** |
+| Google Maps | 0 ⚠️ parked | $0 | $0 | $0 |
+| Indeed | 0 ⚠️ parked | $0 | $0 | $0 |
+| Census ACS | 11,334 rows | FREE | ~$0.001 | ~$0.001 |
+| **Total réel collecté** | | | | **~$4** |
+| Monthly refresh (Zillow+Yelp) | | | | **~$2/month** |
 
-> Bright Data 30-day trial covers initial collection. After trial: ~$5/month ongoing.
+> Bright Data 30-day trial. Google Maps + Indeed parked (BUG-024/025) — si débloqués, ajouter ~$3 initial + ~$2/month.
 
 ---
 
-*Last updated: 2026-03-05*
+*Last updated: 2026-03-06*
