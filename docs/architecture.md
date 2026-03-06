@@ -207,3 +207,20 @@ ADMIN QUERY (via Claude Desktop):
 - **Principe:** Chaque décision technique vise à offrir le service le plus fidèle et transparent possible aux citoyens et aux administrateurs — pas de compromis de qualité qui ne soit pas justifié par une contrainte réelle.
 
 *Last updated: 2026-03-05*
+
+---
+
+## Principes Éthiques de Design
+
+### [ETHICS-001] Enrichissement IA — Neutralité et Non-amplification
+- **Règle cardinale:** L'IA n'enrichit jamais une proposal dont le ton est conflictuel, émotionnel-agressif, ou orienté représaille. Même avec des données factuelles neutres, enrichir un discours de colère peut amplifier un mouvement ou légitimer un narratif dangereux.
+- **Flow:** `moderate_proposal` (tool 11, plannifié) classifie le ton AVANT tout enrichissement. Constructif → enrichissement normal. Émotionnel légitime → enrichissement avec empathie, sans stats amplificatrices. Problématique → silence + alerte modérateur humain.
+- **Principe:** L'IA assiste le jugement humain, elle ne le remplace pas. Les cas limites escaladent vers un humain.
+
+### [TOOL-011] `moderate_proposal` (plannifié)
+- Modèle: Grok-4 (cohérence avec le reste du stack)
+- Input: texte de proposal + catégorie
+- Output: `{tone: constructive|emotional|problematic, enrich: bool, flag_human: bool, reason: str}`
+- Intégration: appelé automatiquement avant `get_neighborhood_intelligence` et tout enrichissement de proposal
+
+*Last updated: 2026-03-06*
