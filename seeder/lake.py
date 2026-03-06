@@ -163,18 +163,18 @@ def upsert_neighborhood(conn, name: str, tract: str = None):
     conn.commit()
 
 
-# ── Embeddings — Google Gemini text-embedding-004 (768d) ─────────────────────
+# ── Embeddings — Google Gemini gemini-embedding-001 (3072d, Matryoshka) ─────────────────────
 
 _gemini = google_genai.Client(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
 
 
 def embed_text(text: str) -> Optional[list]:
-    """Embed text using Google Gemini text-embedding-004 (768 dimensions)."""
+    """Embed text using Google Gemini gemini-embedding-001 (3072 dimensions, Matryoshka)."""
     if not _gemini or not text:
         return None
     try:
         result = _gemini.models.embed_content(
-            model="models/text-embedding-004",
+            model="models/gemini-embedding-001",
             contents=text,
         )
         return result.embeddings[0].values
@@ -200,6 +200,27 @@ def store_embedding(conn, source_table: str, source_id: str, neighborhood: str,
     conn.commit()
 
 
+# ── Bright Data download (bypass SDK race condition bug — see BUG-022) ────────
+
+def brightdata_download(snapshot_id: str) -> list:
+    """
+    Download a Bright Data snapshot via direct REST API.
+    Bypasses the SDK's base.py download() which has a race condition:
+    status="ready" but fetch still returns HTTP 202 "building".
+    Polls until data is actually available.
+    """
+    url = f"https://api.brightdata.com/datasets/snapshots/{snapshot_id}/download"
+    headers = {"Authorization": f"Bearer {BRIGHT_DATA_TOKEN}"}
+    for attempt in range(24):  # poll up to 24 times × 30s = 12 min
+        r = requests.get(url, params={"format": "jsonl"}, headers=headers, timeout=60)
+        if r.status_code == 200 and r.text.strip() and not r.text.strip().startswith("Snapshot is building"):
+            lines = [l for l in r.text.strip().split("\n") if l.strip()]
+            return [json.loads(l) for l in lines]
+        log.info(f"  Snapshot {snapshot_id}: not ready yet (attempt {attempt+1}/24), waiting 30s...")
+        time.sleep(30)
+    raise TimeoutError(f"Snapshot {snapshot_id} not downloadable after 12 min")
+
+
 # ── Source: Zillow ────────────────────────────────────────────────────────────
 
 async def collect_zillow(conn, run_id: str, do_embed: bool) -> tuple[int, int, int]:
@@ -212,7 +233,7 @@ async def collect_zillow(conn, run_id: str, do_embed: bool) -> tuple[int, int, i
             records_limit=RECORDS_LIMIT,
         )
         log.info(f"  Zillow snapshot: {snapshot_id} — waiting for data...")
-        records = await client.datasets.zillow_properties.download(snapshot_id, timeout=300)
+    records = brightdata_download(snapshot_id)
 
     log.info(f"  Got {len(records)} Zillow records")
     collected = len(records)
@@ -281,7 +302,7 @@ async def collect_yelp(conn, run_id: str, do_embed: bool) -> tuple[int, int, int
             records_limit=RECORDS_LIMIT,
         )
         log.info(f"  Yelp snapshot: {snapshot_id} — waiting...")
-        records = await client.datasets.yelp_businesses.download(snapshot_id, timeout=300)
+        records = brightdata_download(snapshot_id)
 
     log.info(f"  Got {len(records)} Yelp records")
     collected = len(records)
@@ -354,13 +375,13 @@ async def collect_google_maps(conn, run_id: str, do_embed: bool) -> tuple[int, i
                 "operator": "and",
                 "filters": [
                     {"name": "country",  "operator": "=", "value": "United States"},
-                    {"name": "address",  "operator": "contains", "value": "Montgomery"},
+                    {"name": "address",  "operator": "includes", "value": "Montgomery"},
                 ],
             },
             records_limit=RECORDS_LIMIT,
         )
         log.info(f"  GMaps snapshot: {snapshot_id} — waiting...")
-        records = await client.datasets.google_maps_reviews.download(snapshot_id, timeout=300)
+        records = brightdata_download(snapshot_id)
 
     log.info(f"  Got {len(records)} Google Maps records")
     collected = len(records)
@@ -422,14 +443,14 @@ async def collect_indeed(conn, run_id: str, do_embed: bool) -> tuple[int, int, i
             filter={
                 "operator": "and",
                 "filters": [
-                    {"name": "location", "operator": "contains", "value": "Montgomery"},
-                    {"name": "location", "operator": "contains", "value": "AL"},
+                    {"name": "location", "operator": "includes", "value": "Montgomery"},
+                    {"name": "region",   "operator": "includes", "value": "Alabama"},
                 ],
             },
             records_limit=RECORDS_LIMIT,
         )
         log.info(f"  Indeed snapshot: {snapshot_id} — waiting...")
-        records = await client.datasets.indeed_jobs.download(snapshot_id, timeout=300)
+        records = brightdata_download(snapshot_id)
 
     log.info(f"  Got {len(records)} Indeed records")
     collected = len(records)

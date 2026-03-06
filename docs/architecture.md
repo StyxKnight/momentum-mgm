@@ -195,4 +195,15 @@ ADMIN QUERY (via Claude Desktop):
 
 ---
 
+---
+
+## Décisions d'Architecture
+
+### [DECISION-001] Embeddings: gemini-embedding-001 @ 3072d, exact search, sans index pgvector
+- **Modèle:** `gemini-embedding-001` (Google Generative AI) — seul modèle d'embedding disponible sur l'API actuelle. `text-embedding-004` retourne 404 NOT_FOUND sur API v1.
+- **Dimensions:** 3072d complet — le modèle supporte Matryoshka (output_dimensionality configurable), mais tronquer = perte de fidélité sémantique. On garde la pleine résolution parce que l'exactitude de l'analyse civique l'exige.
+- **Pas d'index pgvector:** IVFFlat et HNSW supportent max 2000 dimensions, incompatibles avec 3072d. On utilise la recherche exacte (cosine brute force) — suffisant pour toute la durée de vie utile d'une plateforme civique à l'échelle d'une ville: Montgomery AL ne dépassera pas ~100K embeddings, et l'exact search reste sous 200ms sur le Pi à cette échelle.
+- **Scalabilité:** Si un jour le volume croît (~500K+ rows), l'option est pgvector 0.7+ scalar quantization ou output_dimensionality=1536. Pas un problème à court ou moyen terme.
+- **Principe:** Chaque décision technique vise à offrir le service le plus fidèle et transparent possible aux citoyens et aux administrateurs — pas de compromis de qualité qui ne soit pas justifié par une contrainte réelle.
+
 *Last updated: 2026-03-05*

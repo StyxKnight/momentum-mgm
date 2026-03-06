@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS civic_data.properties (
     is_vacant       BOOLEAN,
     raw_data        JSONB,
     collected_at    TIMESTAMP DEFAULT NOW(),
-    embedding       vector(768),
+    embedding       vector(3072),
     UNIQUE(source, external_id)
 );
 
@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS civic_data.businesses (
     is_closed       BOOLEAN DEFAULT FALSE,
     raw_data        JSONB,
     collected_at    TIMESTAMP DEFAULT NOW(),
-    embedding       vector(768),
+    embedding       vector(3072),
     UNIQUE(source, external_id)
 );
 
@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS civic_data.reviews (
     civic_category  VARCHAR,
     raw_data        JSONB,
     collected_at    TIMESTAMP DEFAULT NOW(),
-    embedding       vector(768),
+    embedding       vector(3072),
     UNIQUE(source, external_id)
 );
 
@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS civic_data.jobs (
     posted_at       TIMESTAMP,
     raw_data        JSONB,
     collected_at    TIMESTAMP DEFAULT NOW(),
-    embedding       vector(768),
+    embedding       vector(3072),
     UNIQUE(source, external_id)
 );
 
@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS civic_data.embeddings (
     neighborhood    VARCHAR,
     civic_category  VARCHAR,
     content_text    TEXT NOT NULL,
-    embedding       vector(768) NOT NULL,
+    embedding       vector(3072) NOT NULL,
     embedded_at     TIMESTAMP DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS embeddings_vec_idx

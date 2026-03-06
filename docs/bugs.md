@@ -290,4 +290,22 @@ Recorded during Day 2 full doc audit. These are intentional deviations from orig
 
 ---
 
+### [BUG-022] Bright Data race condition — status="ready" mais download retourne "building"
+- **Date:** 2026-03-05
+- **Severity:** High
+- **Status:** Fixed
+- **Symptom:** `get_status()` retourne `status="ready", size=500` mais `download()` retourne `[{"raw": "Snapshot is building. Try again in a few minutes"}]`. On a perdu ~30 min à créer de nouveaux snapshots inutiles et augmenter les timeouts.
+- **Root Cause:** Race condition HTTP 202 documentée dans le SDK lui-même (`utils/polling.py` ligne 127). `base.py download()` sort de sa boucle de polling dès que status="ready" et tente immédiatement le téléchargement. Mais le endpoint de download peut encore retourner "building" quelques secondes/minutes après. `base.py` ne gère pas ce cas (contrairement à `poll_until_ready` qui a un `except DataNotReadyError` pour ça). Résultat: retourne `[{"raw": "Snapshot is building..."}]` sans erreur.
+- **Fix:** Bypasser le SDK pour le download — appeler directement `GET https://api.brightdata.com/datasets/snapshots/{snap_id}/download?format=jsonl` avec `Authorization: Bearer TOKEN` via `requests`. Le snapshot READY depuis longtemps est téléchargeable immédiatement ainsi.
+- **Lesson:** Quand Bright Data dit `status="ready"`, NE PAS utiliser `client.datasets.X.download()` du SDK. Utiliser requests direct sur l'endpoint REST. Vérifier aussi: ne JAMAIS créer un nouveau snapshot si un ancien existe déjà en status="ready" — le réutiliser.
+
+### [BUG-021] Bright Data snapshot timeout — default 300s insufficient
+- **Date:** 2026-03-05
+- **Severity:** Medium
+- **Status:** Fixed
+- **Symptom:** `lake.py --source zillow` fails with `TimeoutError: Snapshot not ready after 300s (status: building)`. SDK reports status `ready` but download still returns `"Snapshot is building. Try again in a few minutes"`.
+- **Root Cause:** Bright Data builds dataset snapshots asynchronously. Large datasets (500 records, 18MB) can take 10–15+ minutes to build. The default `timeout=300` in `download()` is too short. Additionally there is a propagation delay between status flipping to `ready` and the data being actually downloadable.
+- **Fix:** Increased `timeout` from 300s to 900s (15 min) in all `download()` calls in `lake.py`. The SDK polls every 5s internally.
+- **Lesson:** Always use `timeout=900` minimum for Bright Data `download()` calls. Snapshot build time scales with dataset size and server load — never assume 5 min is enough.
+
 *Last updated: 2026-03-05*
