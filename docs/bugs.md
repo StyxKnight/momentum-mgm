@@ -327,5 +327,6 @@ Recorded during Day 2 full doc audit. These are intentional deviations from orig
 - **Contexte:** Ce projet tourne en mars 2026. Claude Sonnet 4.6 a un cutoff de données en août 2025.
 - **Conséquence pratique:** Claude peut silencieusement "corriger" des versions de modèles, libs ou outils post-août 2025 selon sa connaissance obsolète. Ex: renommer "Gemini Pro 3.0" en "Gemini Pro 2.0" sans avertir.
 - **Mitigation:** Toujours spécifier les versions explicitement. Si Claude corrige une version — faire confiance à l'humain, pas à Claude. Pas de blame — limitation de training, pas d'erreur de logique.
+- **Note:** Gemini Pro 3.0 présente la même limitation — se présente comme Gemini 2.0 pour la même raison (cutoff dataset identique). Universel aux LLMs, pas spécifique à Claude.
 
 *Last updated: 2026-03-06*
