@@ -290,6 +290,16 @@ Recorded during Day 2 full doc audit. These are intentional deviations from orig
 
 ---
 
+### [BUG-023] PostgreSQL: comparaison UUID vs TEXT — "operator does not exist"
+- **Date:** 2026-03-05
+- **Severity:** Medium
+- **Status:** Fixed
+- **Symptom:** `psycopg2.errors.UndefinedFunction: operator does not exist: uuid = text` dans une requête SQL qui comparait `p.id` (UUID) avec `e.source_id` (aussi UUID, mais mal assumé comme TEXT dans le code).
+- **Root Cause:** PostgreSQL est **strictement typé** — il ne convertit jamais implicitement entre types, même entre UUID et TEXT qui représentent la même valeur. Contrairement à MySQL ou SQLite qui acceptent des comparaisons mixtes silencieusement, PostgreSQL refuse et lève une erreur explicite. On avait assumé que `source_id` était TEXT, mais la colonne est en fait UUID.
+- **Pourquoi c'est intéressant:** C'est une caractéristique de design de PostgreSQL, pas un bug. Ça force la rigueur des types et évite des bugs silencieux de comparaison. La même valeur `a3f2-...` stockée en UUID vs TEXT a des index et comportements différents.
+- **Fix:** Comparer UUID à UUID directement (`p.id = e.source_id`) sans cast. Pour le NOT IN: `p.id NOT IN (SELECT source_id FROM ... WHERE ...)` — les deux côtés sont UUID, PostgreSQL accepte.
+- **Lesson:** Toujours vérifier les types de colonnes avec `\d table_name` avant d'écrire des JOINs ou des comparaisons. Ne jamais assumer qu'un ID stocké en DB est TEXT — PostgreSQL fait la distinction UUID/TEXT/VARCHAR rigoureusement.
+
 ### [BUG-022] Bright Data race condition — status="ready" mais download retourne "building"
 - **Date:** 2026-03-05
 - **Severity:** High
