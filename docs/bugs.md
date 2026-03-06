@@ -318,4 +318,14 @@ Recorded during Day 2 full doc audit. These are intentional deviations from orig
 - **Fix:** Increased `timeout` from 300s to 900s (15 min) in all `download()` calls in `lake.py`. The SDK polls every 5s internally.
 - **Lesson:** Always use `timeout=900` minimum for Bright Data `download()` calls. Snapshot build time scales with dataset size and server load — never assume 5 min is enough.
 
-*Last updated: 2026-03-05*
+---
+
+## Limitations Connues (comportement attendu, pas des bugs)
+
+### [LIM-001] Claude — Knowledge cutoff août 2025
+- **Date notée:** 2026-03-06
+- **Contexte:** Ce projet tourne en mars 2026. Claude Sonnet 4.6 a un cutoff de données en août 2025.
+- **Conséquence pratique:** Claude peut silencieusement "corriger" des versions de modèles, libs ou outils post-août 2025 selon sa connaissance obsolète. Ex: renommer "Gemini Pro 3.0" en "Gemini Pro 2.0" sans avertir.
+- **Mitigation:** Toujours spécifier les versions explicitement. Si Claude corrige une version — faire confiance à l'humain, pas à Claude. Pas de blame — limitation de training, pas d'erreur de logique.
+
+*Last updated: 2026-03-06*
