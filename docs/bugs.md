@@ -318,6 +318,24 @@ Recorded during Day 2 full doc audit. These are intentional deviations from orig
 - **Fix:** Increased `timeout` from 300s to 900s (15 min) in all `download()` calls in `lake.py`. The SDK polls every 5s internally.
 - **Lesson:** Always use `timeout=900` minimum for Bright Data `download()` calls. Snapshot build time scales with dataset size and server load — never assume 5 min is enough.
 
+### [BUG-025] Google Maps dataset — URL-based, requiert URLs de places individuelles
+- **Date:** 2026-03-06
+- **Severity:** Medium
+- **Status:** Won't Fix (hackathon scope)
+- **Symptom:** Filtre `address includes Montgomery` → `no_records_found`. URLs de recherche (`/maps/search/restaurants@coords`) → snapshot ready mais `records: 0`.
+- **Root Cause:** Le dataset `gd_luzfs1dn2oa0teb81` est URL-based et requiert des URLs de places Google Maps individuelles (`/maps/place/...`). Il ne supporte ni filtres JSON ni URLs de résultats de recherche.
+- **Fix potentiel:** Utiliser Google Places API (Text Search) pour obtenir des place_ids → construire les URLs → alimenter Bright Data. Trop de steps pour le hackathon.
+- **Alternative:** Yelp couvre déjà le même besoin (500 commerces en DB). Google Maps = nice-to-have.
+
+### [BUG-024] Indeed SDK filtre "name"/"includes" → snapshot failed
+- **Date:** 2026-03-06
+- **Severity:** High
+- **Status:** Fixed
+- **Symptom:** `lake.py --source indeed` déclenche un snapshot qui revient immédiatement `status: failed`. Aucune donnée collectée.
+- **Root Cause:** Le dataset Indeed (`gd_lpfll7v5hcqtkxl6l`) est **URL-based**, pas filter-based. Il n'accepte pas de champ `filters` ni `limit` — il requiert un tableau `[{"url": "..."}]` avec une URL Indeed directe. Le SDK wrappait en filtres JSON, ce qui causait le `snapshot: failed` immédiat.
+- **Fix:** Bypass du SDK — REST direct avec `json=[{"url": "https://www.indeed.com/jobs?l=Montgomery%2C+AL&radius=25"}]`. Download via `brightdata_download()` existant (BUG-022 pattern).
+- **Lesson:** Vérifier le type de dataset dans Bright Data Marketplace avant de coder: "Filter Dataset" (JSON filters) vs "URL Dataset" (tableau d'URLs). Indeed = URL-based.
+
 ---
 
 ## Limitations Connues (comportement attendu, pas des bugs)

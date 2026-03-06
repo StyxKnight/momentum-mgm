@@ -205,20 +205,40 @@ def store_embedding(conn, source_table: str, source_id: str, neighborhood: str,
 def brightdata_download(snapshot_id: str) -> list:
     """
     Download a Bright Data snapshot via direct REST API.
-    Bypasses the SDK's base.py download() which has a race condition:
-    status="ready" but fetch still returns HTTP 202 "building".
-    Polls until data is actually available.
+    Handles two snapshot types:
+    - snap_* : SDK-triggered → status via /snapshots/{id}, download via /snapshots/{id}/download
+    - sd_*   : v3/trigger-triggered → status via /v3/progress/{id}, download via /v3/download/{id}
     """
-    url = f"https://api.brightdata.com/datasets/snapshots/{snapshot_id}/download"
     headers = {"Authorization": f"Bearer {BRIGHT_DATA_TOKEN}"}
-    for attempt in range(24):  # poll up to 24 times × 30s = 12 min
-        r = requests.get(url, params={"format": "jsonl"}, headers=headers, timeout=60)
-        if r.status_code == 200 and r.text.strip() and not r.text.strip().startswith("Snapshot is building"):
+    is_v3 = snapshot_id.startswith("sd_")
+
+    for attempt in range(40):  # poll up to 40 × 30s = 20 min
+        # Check status
+        if is_v3:
+            status_r = requests.get(
+                f"https://api.brightdata.com/datasets/v3/progress/{snapshot_id}",
+                headers=headers, timeout=30
+            )
+            status = status_r.json().get("status", "")
+            if status == "failed":
+                raise RuntimeError(f"Snapshot {snapshot_id} failed: {status_r.json()}")
+            if status != "ready":
+                log.info(f"  Snapshot {snapshot_id}: {status} (attempt {attempt+1}/40), waiting 30s...")
+                time.sleep(30)
+                continue
+            download_url = f"https://api.brightdata.com/datasets/v3/download/{snapshot_id}"
+        else:
+            download_url = f"https://api.brightdata.com/datasets/snapshots/{snapshot_id}/download"
+
+        # Download
+        r = requests.get(download_url, params={"format": "jsonl"}, headers=headers, timeout=60)
+        if r.status_code == 200 and r.text.strip() and "Snapshot is building" not in r.text:
             lines = [l for l in r.text.strip().split("\n") if l.strip()]
             return [json.loads(l) for l in lines]
-        log.info(f"  Snapshot {snapshot_id}: not ready yet (attempt {attempt+1}/24), waiting 30s...")
+        log.info(f"  Snapshot {snapshot_id}: not ready yet (attempt {attempt+1}/40), waiting 30s...")
         time.sleep(30)
-    raise TimeoutError(f"Snapshot {snapshot_id} not downloadable after 12 min")
+
+    raise TimeoutError(f"Snapshot {snapshot_id} not downloadable after 20 min")
 
 
 # ── Source: Zillow ────────────────────────────────────────────────────────────
@@ -368,20 +388,30 @@ async def collect_google_maps(conn, run_id: str, do_embed: bool) -> tuple[int, i
     log.info("Collecting Google Maps reviews for Montgomery, AL...")
     collected = upserted = embedded = 0
 
-    # Google Maps reviews are queried by place URL — we use city-level filter
-    async with BrightDataClient(token=BRIGHT_DATA_TOKEN) as client:
-        snapshot_id = await client.datasets.google_maps_reviews(
-            filter={
-                "operator": "and",
-                "filters": [
-                    {"name": "country",  "operator": "=", "value": "United States"},
-                    {"name": "address",  "operator": "includes", "value": "Montgomery"},
-                ],
-            },
-            records_limit=RECORDS_LIMIT,
-        )
-        log.info(f"  GMaps snapshot: {snapshot_id} — waiting...")
-        records = brightdata_download(snapshot_id)
+    # GMaps dataset = URL-based (filter-based retourne no_records_found).
+    # On passe des URLs de recherche Google Maps pour Montgomery, AL.
+    GMAPS_DATASET_ID = "gd_luzfs1dn2oa0teb81"
+    mgm_coords = "32.3792,-86.3077,13z"
+    gmaps_urls = [
+        {"url": f"https://www.google.com/maps/search/restaurants/@{mgm_coords}"},
+        {"url": f"https://www.google.com/maps/search/shops/@{mgm_coords}"},
+        {"url": f"https://www.google.com/maps/search/services/@{mgm_coords}"},
+        {"url": f"https://www.google.com/maps/search/parks/@{mgm_coords}"},
+        {"url": f"https://www.google.com/maps/search/healthcare/@{mgm_coords}"},
+    ]
+    trigger_resp = requests.post(
+        f"https://api.brightdata.com/datasets/v3/trigger?dataset_id={GMAPS_DATASET_ID}&include_errors=true",
+        headers={"Authorization": f"Bearer {BRIGHT_DATA_TOKEN}", "Content-Type": "application/json"},
+        json=gmaps_urls,
+        timeout=30,
+    )
+    trigger_data = trigger_resp.json()
+    snapshot_id = trigger_data.get("snapshot_id")
+    if not snapshot_id:
+        log.error(f"  GMaps trigger failed: {trigger_data}")
+        return 0, 0, 0
+    log.info(f"  GMaps snapshot: {snapshot_id} — waiting...")
+    records = brightdata_download(snapshot_id)
 
     log.info(f"  Got {len(records)} Google Maps records")
     collected = len(records)
@@ -438,19 +468,23 @@ async def collect_indeed(conn, run_id: str, do_embed: bool) -> tuple[int, int, i
     log.info("Collecting Indeed jobs for Montgomery, AL...")
     collected = upserted = embedded = 0
 
-    async with BrightDataClient(token=BRIGHT_DATA_TOKEN) as client:
-        snapshot_id = await client.datasets.indeed_jobs(
-            filter={
-                "operator": "and",
-                "filters": [
-                    {"name": "location", "operator": "includes", "value": "Montgomery"},
-                    {"name": "region",   "operator": "includes", "value": "Alabama"},
-                ],
-            },
-            records_limit=RECORDS_LIMIT,
-        )
-        log.info(f"  Indeed snapshot: {snapshot_id} — waiting...")
-        records = brightdata_download(snapshot_id)
+    # BUG-024: dataset Indeed = URL-based, pas filter-based. Requiert "url" Indeed.
+    # gd_lpfll7v5hcqtkxl6l = LinkedIn (erreur Gemini). Notre vrai Indeed = gd_l4dx9j9sscpvs7no2
+    INDEED_DATASET_ID = "gd_l4dx9j9sscpvs7no2"
+    indeed_url = "https://www.indeed.com/jobs?l=Montgomery%2C+AL&radius=25"
+    trigger_resp = requests.post(
+        f"https://api.brightdata.com/datasets/v3/trigger?dataset_id={INDEED_DATASET_ID}&include_errors=true",
+        headers={"Authorization": f"Bearer {BRIGHT_DATA_TOKEN}", "Content-Type": "application/json"},
+        json=[{"url": indeed_url}],
+        timeout=30,
+    )
+    trigger_data = trigger_resp.json()
+    snapshot_id = trigger_data.get("snapshot_id")
+    if not snapshot_id:
+        log.error(f"  Indeed trigger failed: {trigger_data}")
+        return 0, 0, 0
+    log.info(f"  Indeed snapshot: {snapshot_id} — waiting...")
+    records = brightdata_download(snapshot_id)
 
     log.info(f"  Got {len(records)} Indeed records")
     collected = len(records)
