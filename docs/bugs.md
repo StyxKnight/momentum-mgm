@@ -387,4 +387,15 @@ Recorded during Day 2 full doc audit. These are intentional deviations from orig
 - **Fix:** Utiliser les vrais types. Liste complète via `Decidim::Forms::Question::QUESTION_TYPES` : `["short_response", "long_response", "single_option", "multiple_option", "sorting", "files", "matrix_single", "matrix_multiple"]`.
 - **Lesson:** Toujours valider les types avec `QUESTION_TYPES` avant de coder. Les exemples en ligne utilisent les anciens noms.
 
+### [DECISION-002] Geocoding quartiers Montgomery AL — zip codes comme proxy de quartier
+- **Date:** 2026-03-06
+- **Contexte:** 493/500 propriétés Zillow avaient `neighborhood = "Montgomery County"` (trop générique). Les MCP tools `get_neighborhood_intelligence` et `get_neighborhood_velocity` filtraient sur ce champ → 0 résultats utiles.
+- **Approches testées:** Nominatim (OSM) → "Montgomery County" à tous les niveaux de zoom. Google Maps Geocoding API → `result_type=neighborhood` → ZERO_RESULTS sur toute la ville. Montgomery AL n'existe tout simplement pas dans les bases de données de polygones de quartiers.
+- **Décision:** Zip code → nom de quartier sémantique. Montgomery AL a 10 zip codes civiques distincts. Mapping vérifié via recherches web (City-Data, NeighborhoodScout, Apartments.com).
+- **Mapping final (vérifié):** 36104→Downtown, 36105→South, 36106→Midtown/Cloverdale, 36107→Cottage Hill, 36108→West Side ($36.6M grant), 36109→East/Forest Park, 36110→North/Chisholm, 36111→Southeast, 36116→South/Eastchase, 36117→East/Eastdale
+- **Census tracts:** 77 tracts mappés à zones (tracts 1–33 = ville, 51+ = rural).
+- **Script:** `seeder/geocode_fix.py` — idempotent, re-runner après chaque ingestion.
+- **Résultat:** 500 properties ✅, 451 businesses ✅, 77 tracts census ✅.
+- **Lesson:** Pour les villes secondaires US, le zip code est le meilleur proxy de quartier disponible quand OSM/Google n'ont pas de polygones.
+
 *Last updated: 2026-03-06*

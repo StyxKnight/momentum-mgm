@@ -136,6 +136,10 @@ Momentum MGM is a civic intelligence platform built on three layers:
   - 13 surveys / 59 questions grounded in real Montgomery civic issues
 - Data lake coverage gaps identified and documented (see data_lake.md)
 - `seeder/cleanup_decidim.rb` — Decidim enrichment script (rerunnable)
+- `seeder/geocode_fix.py` — neighborhood fix for civic_data tables (see DECISION-002 in bugs.md)
+  - 500 properties + 451 businesses + 77 census tracts → real neighborhood names
+  - Zip code proxy approach (Nominatim + Google Maps both confirmed non-viable for Montgomery AL)
+  - Idempotent — safe to re-run after any new data ingestion
 
 ## What Is NOT Yet Built (planned Day 5-6)
 
