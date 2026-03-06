@@ -159,6 +159,19 @@ CREATE INDEX IF NOT EXISTS idx_city_data_raw_objectid  ON civic_data.city_data (
 --   Building_Permit_viewlayer  → infrastructure (~5.6k rows, 2022+)
 --   Fire_Rescue_All_Incidents  → public_safety  (~10k most recent of 55k total)
 
+-- ── AI Reports (neighborhood intelligence, velocity, solutions) ──────────────
+CREATE TABLE IF NOT EXISTS civic_data.reports (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    report_type  VARCHAR NOT NULL,   -- 'neighborhood_velocity' | 'neighborhood_intelligence' | 'find_solutions'
+    subject      VARCHAR NOT NULL,   -- quartier ou problème
+    generated_at TIMESTAMP DEFAULT NOW(),
+    generated_by VARCHAR DEFAULT 'grok-4-fast',
+    payload      JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reports_type_subject ON civic_data.reports (report_type, subject);
+CREATE INDEX IF NOT EXISTS idx_reports_generated_at ON civic_data.reports (generated_at DESC);
+-- Populated by: MCP tools 7-10 via civic_intelligence.py
+
 -- ── Neighborhoods populated dynamically by lake.py ──────────────────────────
 -- DO NOT seed manually — neighborhood names come from Nominatim reverse geocoding
 -- (lat/lon → suburb name). Census tract IDs come from Census API responses.
