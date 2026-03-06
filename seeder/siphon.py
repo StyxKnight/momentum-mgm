@@ -36,7 +36,8 @@ SCHEDULES = {
     "yelp":                 timedelta(days=7),
     "google_maps":          timedelta(days=7),
     "zillow":               timedelta(days=30),
-    "montgomery_opendata":  timedelta(days=1),   # 311/permits/fire — données fraîches quotidiennement
+    "montgomery_opendata":  timedelta(days=1),    # 311/permits/fire — données fraîches quotidiennement
+    "yelp_expanded":        timedelta(days=7),    # groceries, clinics, schools, parks
     "census":               timedelta(days=365),
 }
 

@@ -77,7 +77,7 @@ CENSUS_VARS = {
     "edu_bachelors_plus": "B15003_022E",
 }
 
-RECORDS_LIMIT = 500
+RECORDS_LIMIT = 3000
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("lake")
@@ -380,6 +380,136 @@ async def collect_yelp(conn, run_id: str, do_embed: bool) -> tuple[int, int, int
 
     log.info(f"  Yelp: {upserted} upserted, {embedded} embedded")
     return collected, upserted, embedded
+
+
+# ── Source: Yelp élargi — catégories civiques ────────────────────────────────
+
+YELP_CIVIC_CATEGORIES = [
+    # (keyword, civic_category)
+    ("Grocery Stores",  "environment"),    # food deserts
+    ("Supermarkets",    "environment"),
+    ("Hospitals",       "health"),
+    ("Urgent Care",     "health"),
+    ("Clinics",         "health"),
+    ("Pharmacies",      "health"),
+    ("Elementary Schools", "education"),
+    ("Middle Schools",  "education"),
+    ("High Schools",    "education"),
+    ("Parks",           "parks_culture"),
+    ("Recreation Centers", "parks_culture"),
+    ("Community Centers",  "parks_culture"),
+]
+
+
+async def collect_yelp_expanded(conn, run_id: str, do_embed: bool) -> tuple[int, int, int]:
+    """
+    Collect Yelp businesses for specific civic categories not covered by collect_yelp().
+    Uses URL-based v3/trigger with Yelp search URLs (keyword filter unsupported by SDK).
+    Civic categories: environment (food deserts), health, education, parks_culture.
+    """
+    log.info("Collecting Yelp expanded (civic categories) for Montgomery, AL...")
+    total_collected = total_upserted = total_embedded = 0
+
+    MGM_LOC = "Montgomery%2C+AL"
+    yelp_urls = [
+        {"url": f"https://www.yelp.com/search?find_desc={kw.replace(' ', '+')}&find_loc={MGM_LOC}"}
+        for kw, _ in YELP_CIVIC_CATEGORIES
+    ]
+    # Map keyword → civic_cat for post-processing
+    kw_to_cat = {kw: cat for kw, cat in YELP_CIVIC_CATEGORIES}
+
+    trigger_resp = requests.post(
+        "https://api.brightdata.com/datasets/v3/trigger?dataset_id=gd_lgugwl0519h1p14rwk&include_errors=true",
+        headers={"Authorization": f"Bearer {BRIGHT_DATA_TOKEN}", "Content-Type": "application/json"},
+        json=yelp_urls,
+        timeout=30,
+    )
+    trigger_data = trigger_resp.json()
+    snapshot_id = trigger_data.get("snapshot_id")
+    if not snapshot_id:
+        log.error(f"  Yelp expanded trigger failed: {trigger_data}")
+        return 0, 0, 0
+
+    log.info(f"  Yelp expanded snapshot: {snapshot_id} — waiting...")
+    records = brightdata_download(snapshot_id)
+    log.info(f"  Got {len(records)} records")
+    total_collected = len(records)
+
+    for r in records:
+        ext_id = str(r.get("business_id") or r.get("yelp_biz_id") or r.get("url") or uuid.uuid4())
+
+        # Skip if already in DB
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM civic_data.businesses WHERE source='yelp' AND external_id=%s LIMIT 1",
+                (ext_id,),
+            )
+            if cur.fetchone():
+                continue
+
+        lat = r.get("latitude")
+        lon = r.get("longitude")
+        neighborhood = reverse_geocode(lat, lon) if lat and lon else "Montgomery"
+        upsert_neighborhood(conn, neighborhood)
+
+        category = r.get("categories")
+        if isinstance(category, list):
+            category = category[0] if category else "business"
+        elif not category:
+            category = "business"
+
+        # Infer civic category from category name
+        cat_lower = category.lower()
+        if any(k in cat_lower for k in ["grocery", "supermarket", "food"]):
+            civic_cat = "environment"
+        elif any(k in cat_lower for k in ["hospital", "clinic", "urgent", "pharmacy", "health", "medical"]):
+            civic_cat = "health"
+        elif any(k in cat_lower for k in ["school", "education", "tutoring", "college"]):
+            civic_cat = "education"
+        elif any(k in cat_lower for k in ["park", "recreation", "community center", "sport"]):
+            civic_cat = "parks_culture"
+        else:
+            civic_cat = "economy"
+
+        content = (
+            f"{r.get('name', '')} ({category}) in {neighborhood} — "
+            f"rating {r.get('overall_rating', '?')}/5, "
+            f"{r.get('reviews_count', 0)} reviews, "
+            f"{'closed' if r.get('is_closed') else 'open'}"
+        )
+
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO civic_data.businesses
+                   (id, source, external_id, name, category, neighborhood,
+                    address, latitude, longitude, rating, review_count,
+                    price_range, is_closed, raw_data, collected_at)
+                   VALUES (%s,'yelp',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                   ON CONFLICT (source, external_id) DO NOTHING
+                   RETURNING id""",
+                (
+                    str(uuid.uuid4()), ext_id,
+                    r.get("name"), category, neighborhood,
+                    r.get("full_address") or r.get("address"),
+                    lat, lon,
+                    r.get("overall_rating"), r.get("reviews_count"),
+                    r.get("price_range"), bool(r.get("is_closed")),
+                    json.dumps(r),
+                ),
+            )
+            row = cur.fetchone()
+            conn.commit()
+            if row:
+                total_upserted += 1
+                if do_embed:
+                    vec = embed_text(content)
+                    if vec:
+                        store_embedding(conn, "businesses", str(row[0]),
+                                        neighborhood, civic_cat, content, vec)
+                        total_embedded += 1
+
+    log.info(f"  Yelp expanded: {total_upserted} new businesses inserted, {total_embedded} embedded")
+    return total_collected, total_upserted, total_embedded
 
 
 # ── Source: Google Maps reviews ───────────────────────────────────────────────
@@ -832,7 +962,8 @@ SOURCES = {
     "google_maps":        ("async", collect_google_maps),
     "indeed":             ("async", collect_indeed),
     "census":             ("sync",  collect_census),
-    "montgomery_opendata": ("sync", collect_montgomery_opendata),
+    "montgomery_opendata": ("sync",  collect_montgomery_opendata),
+    "yelp_expanded":       ("async", collect_yelp_expanded),
 }
 
 

@@ -4,7 +4,9 @@ import psycopg2
 from psycopg2 import sql
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, timedelta
+import os
+from google import genai
 
 # --- CONFIGURATION & STYLE ---
 st.set_page_config(
@@ -51,6 +53,19 @@ def run_query(query, params=None):
     finally:
         conn.close()
 
+def get_embedding(query):
+    """Génère un embedding via l'API Google Gemini."""
+    api_key = os.getenv('GOOGLE_API_KEY')
+    if not api_key:
+        return None
+    try:
+        client = genai.Client(api_key=api_key)
+        result = client.models.embed_content(model="models/gemini-embedding-001", contents=query)
+        return result.embeddings[0].values
+    except Exception as e:
+        st.error(f"Embedding error: {e}")
+        return None
+
 # --- SIDEBAR & NAV ---
 st.sidebar.markdown("# 🏙️ MGM")
 st.sidebar.markdown("### Momentum Montgomery")
@@ -63,7 +78,8 @@ page = st.sidebar.radio(
         "4. Neighborhood Comparison",
         "5. Civic Proposals (Decidim)",
         "6. Neighborhood Intelligence",
-        "7. AI Query (Semantic)"
+        "7. AI Query (Semantic)",
+        "8. City Incidents"
     ]
 )
 
@@ -77,7 +93,7 @@ if not freshness_df.empty and freshness_df['last_update'].iloc[0]:
 if "1. Overview" in page:
     st.title("🏙️ Montgomery City Overview")
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     
     overview_stats = run_query("""
         WITH latest AS (SELECT MAX(year) as max_yr FROM civic_data.census)
@@ -87,17 +103,23 @@ if "1. Overview" in page:
         GROUP BY metric
     """)
     
+    incident_count_df = run_query("""
+        SELECT COUNT(*) as count FROM civic_data.city_data 
+        WHERE reported_at >= '2025-01-01' OR reported_at IS NULL
+    """)
+    incident_count = incident_count_df['count'].iloc[0] if not incident_count_df.empty else 0
+    
     if not overview_stats.empty:
-        # Calculs rapides
         inc = overview_stats[overview_stats['metric']=='median_income']['val'].mean()
         pov_b = overview_stats[overview_stats['metric']=='poverty_below']['val'].sum()
         pov_t = overview_stats[overview_stats['metric']=='poverty_total']['val'].sum()
         h_v = overview_stats[overview_stats['metric']=='housing_vacant']['val'].sum()
         h_t = overview_stats[overview_stats['metric']=='housing_total']['val'].sum()
         
-        col1.metric("Avg Median Income", f"${inc:,.0f}", delta="City-wide avg")
-        col2.metric("Poverty Rate", f"{(pov_b/pov_t*100):.1f}%", delta_color="inverse")
-        col3.metric("Housing Vacancy", f"{(h_v/h_t*100):.1f}%", delta_color="inverse")
+        col1.metric("Avg Median Income", f"${inc:,.0f}")
+        col2.metric("Poverty Rate", f"{(pov_b/pov_t*100):.1f}%")
+        col3.metric("Housing Vacancy", f"{(h_v/h_t*100):.1f}%")
+        col4.metric("City Incidents (2025)", f"{incident_count:,}")
 
     st.markdown("---")
     
@@ -109,13 +131,10 @@ if "1. Overview" in page:
             fig = px.line(df_inc, x='year', y='val', color_discrete_sequence=[COLORS['economy']])
             st.plotly_chart(fig, use_container_width=True)
     with c2:
-        st.subheader("Unemployment Trend")
-        df_unemp = run_query("""
-            SELECT year, SUM(CASE WHEN metric='unemployed' THEN value ELSE 0 END) / NULLIF(SUM(CASE WHEN metric='labor_force' THEN value ELSE 0 END), 0) * 100 as rate
-            FROM civic_data.census GROUP BY year ORDER BY year
-        """)
-        if not df_unemp.empty:
-            fig = px.area(df_unemp, x='year', y='rate', color_discrete_sequence=[COLORS['public_safety']])
+        st.subheader("City Data by Category")
+        df_cat = run_query("SELECT category, COUNT(*) as count FROM civic_data.city_data GROUP BY category")
+        if not df_cat.empty:
+            fig = px.bar(df_cat, x='category', y='count', color='category', color_discrete_map=COLORS)
             st.plotly_chart(fig, use_container_width=True)
 
 # --- PAGE 2: REAL ESTATE ---
@@ -185,27 +204,41 @@ elif "4. Comparison" in page:
 # --- PAGE 5: CIVIC PROPOSALS ---
 elif "5. Civic Proposals" in page:
     st.title("🗳️ Decidim Civic Proposals")
-    st.info("Direct connection to Decidim API pending. Showing aggregated data from hackathon submissions.")
     
-    # TODO: Connect to civic_data.proposals table once migration is complete
-    proposal_data = {
-        "category": ["Infrastructure", "Parks & Culture", "Public Safety", "Transportation", "Environment", "Health", "Education", "Economy", "Governance", "Housing"],
-        "count": [12, 8, 15, 7, 10, 4, 9, 11, 3, 21]
-    }
-    df_p = pd.DataFrame(proposal_data)
+    df_p = run_query("""
+        SELECT
+            c.name->>'en' as category,
+            COUNT(p.id) as count,
+            SUM(p.proposal_votes_count) as total_votes
+        FROM decidim_proposals_proposals p
+        JOIN decidim_categorizations cat ON cat.categorizable_id = p.id
+            AND cat.categorizable_type = 'Decidim::Proposals::Proposal'
+        JOIN decidim_categories c ON c.id = cat.decidim_category_id
+        WHERE p.published_at IS NOT NULL
+        GROUP BY c.name->>'en'
+        ORDER BY count DESC
+    """)
     
-    c1, c2 = st.columns([2, 1])
-    with c1:
-        st.subheader("Proposals by Category")
-        st.plotly_chart(px.bar(df_p, x='category', y='count', color='category', color_discrete_map=COLORS), use_container_width=True)
-    
-    with c2:
-        st.subheader("🔥 Top Voted")
-        top_voted = pd.DataFrame({
-            "Title": ["Downtown Light Rail", "West MGM Health Center", "Affordable Housing Bloc A", "Smart Street Lights", "Riverwalk Extension"],
-            "Votes": [452, 389, 312, 285, 210]
-        })
-        st.table(top_voted)
+    if df_p.empty:
+        st.info("No proposals available.")
+    else:
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            st.subheader("Proposals by Category")
+            # Mapping category names to COLORS dict keys if possible
+            st.plotly_chart(px.bar(df_p, x='category', y='count', color='category'), use_container_width=True)
+        
+        with c2:
+            st.subheader("🔥 Top Voted")
+            top_voted = run_query("""
+                SELECT title->>'en' as title, proposal_votes_count as votes
+                FROM decidim_proposals_proposals
+                WHERE published_at IS NOT NULL
+                ORDER BY proposal_votes_count DESC
+                LIMIT 10
+            """)
+            if not top_voted.empty:
+                st.table(top_voted)
 
 # --- PAGE 6: NEIGHBORHOOD INTELLIGENCE ---
 elif "6. Neighborhood Intelligence" in page:
@@ -241,30 +274,24 @@ elif "6. Neighborhood Intelligence" in page:
                 
         with c2:
             st.subheader("Civic Health Score")
-            # --- Score Calculation ---
-            # Income Trend (0.4)
             inc_data = df_c[df_c['metric']=='median_income'].sort_values('year')
             inc_score = 0.5
             if len(inc_data) >= 2:
                 change = (inc_data.iloc[-1]['value'] - inc_data.iloc[0]['value']) / inc_data.iloc[0]['value']
                 inc_score = min(1.0, max(0.0, 0.5 + change))
             
-            # Housing (0.3)
             vac_data = df_c[df_c['metric']=='housing_vacant']
             vac_score = 0.7
             if not vac_data.empty:
-                # Basic normalization for example
                 vac_rate = vac_data['value'].iloc[-1] / 100 
                 vac_score = max(0.0, 1.0 - vac_rate)
 
-            # Business (0.3)
             biz_score = 0.8
             if not df_b.empty:
                 biz_score = 1.0 - df_b['is_closed'].mean()
 
             final_score = (inc_score * 0.4) + (vac_score * 0.3) + (biz_score * 0.3)
             
-            # Badge logic
             if final_score > 0.7: badge = "🟢 High Vitality"
             elif final_score > 0.4: badge = "🟡 Stable"
             else: badge = "🔴 Attention Required"
@@ -273,6 +300,34 @@ elif "6. Neighborhood Intelligence" in page:
             st.progress(final_score)
             
             st.caption("Income Trend: {:.2f} | Housing: {:.2f} | Business: {:.2f}".format(inc_score, vac_score, biz_score))
+
+        # City Activity Section
+        st.markdown("---")
+        st.subheader("🏙️ City Activity")
+        df_activity = run_query("""
+            SELECT source, COUNT(*) as count,
+                   COUNT(*) FILTER (WHERE status IN ('open','Open','OPEN','active','Active')) as open_count
+            FROM civic_data.city_data
+            WHERE neighborhood = %s
+            GROUP BY source
+        """, (selected,))
+        
+        recent_incidents = run_query("""
+            SELECT COUNT(*) as count FROM civic_data.city_data 
+            WHERE neighborhood = %s AND reported_at >= %s
+        """, (selected, datetime.now() - timedelta(days=30)))
+        
+        if not df_activity.empty:
+            m1, m2, m3 = st.columns(3)
+            violations = df_activity[df_activity['source'] == 'code_violations']['open_count'].sum()
+            permits = df_activity[df_activity['source'] == 'building_permits']['open_count'].sum()
+            recent = recent_incidents['count'].iloc[0] if not recent_incidents.empty else 0
+            
+            m1.metric("Active Violations", violations)
+            m2.metric("Active Permits", permits)
+            m3.metric("Recent Incidents (30j)", recent)
+        else:
+            st.info("No recent city activity recorded for this neighborhood.")
 
         # 3. Trend Chart
         st.markdown("---")
@@ -286,22 +341,114 @@ elif "6. Neighborhood Intelligence" in page:
 elif "7. AI Query" in page:
     st.title("🧠 Semantic Intelligence")
     
-    st.info("🔌 Connect your local MCP server to unlock real-time vector search across Montgomery datasets.")
-    
     query = st.text_input("Ask a question about Montgomery neighborhoods...", placeholder="Which neighborhood has the best ratio of high-rated businesses to affordable housing?")
     
     if query:
-        st.write("🔍 Searching through `civic_data.embeddings`...")
-        st.warning("Feature in progress: RAG pipeline integration required.")
+        st.write(f"🔍 Searching for: *{query}*")
+        vec = get_embedding(query)
+        
+        if vec:
+            results = run_query("""
+                SELECT source_table, source_id, neighborhood, category, content_text,
+                       1 - (embedding <=> %s::vector) as similarity
+                FROM civic_data.embeddings
+                ORDER BY embedding <=> %s::vector
+                LIMIT 10
+            """, (vec, vec))
+            
+            if results.empty:
+                st.info("No matching results found.")
+            else:
+                for idx, row in results.iterrows():
+                    with st.container():
+                        c1, c2 = st.columns([4, 1])
+                        c1.markdown(f"**{row['neighborhood']}** | {row['category'].title()} ({row['source_table']})")
+                        c2.markdown(f"Score: `{row['similarity']:.3f}`")
+                        st.write(row['content_text'])
+                        st.divider()
+        else:
+            st.error("🔌 Connect your Google API Key to unlock AI features.")
+            st.info("Example queries: 'Where are the new construction permits?', 'Find areas with low poverty but high housing vacancy'.")
         
     st.markdown("---")
     st.subheader("Embeddings Statistics")
-    
     stats = run_query("SELECT source_type, COUNT(*) as count FROM civic_data.embeddings GROUP BY source_type")
     if not stats.empty:
-        st.plotly_chart(px.pie(stats, names='source_type', values='count', title="Vectorized Content Breakdown", hole=0.4, color_discrete_sequence=[COLORS['infrastructure'], COLORS['economy']]), use_container_width=True)
-    else:
-        st.warning("No embeddings found in `civic_data.embeddings`.")
+        st.plotly_chart(px.pie(stats, names='source_type', values='count', title="Vectorized Content Breakdown", hole=0.4), use_container_width=True)
+
+# --- PAGE 8: CITY INCIDENTS ---
+elif "8. City Incidents" in page:
+    st.title("🚨 City Incidents & Data")
+    
+    # Sidebar Filters
+    st.sidebar.subheader("Incident Filters")
+    all_sources = run_query("SELECT DISTINCT source FROM civic_data.city_data")['source'].tolist()
+    selected_sources = st.sidebar.multiselect("Select Sources", all_sources, default=all_sources)
+    
+    # 1. Top Metrics
+    metrics_df = run_query("""
+        SELECT 
+            COUNT(*) FILTER (WHERE source = 'code_violations') as violations,
+            COUNT(*) FILTER (WHERE source = 'building_permits') as permits,
+            COUNT(*) FILTER (WHERE source = 'fire_incidents') as fire
+        FROM civic_data.city_data
+        WHERE source IN %s
+    """, (tuple(selected_sources),))
+    
+    if not metrics_df.empty:
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Code Violations", f"{metrics_df['violations'].iloc[0]:,}")
+        m2.metric("Building Permits", f"{metrics_df['permits'].iloc[0]:,}")
+        m3.metric("Fire Incidents", f"{metrics_df['fire'].iloc[0]:,}")
+    
+    st.divider()
+    
+    # 2. Charts
+    c1, c2 = st.columns(2)
+    
+    with c1:
+        st.subheader("Incidents by Neighborhood (Top 15)")
+        neigh_df = run_query("""
+            SELECT neighborhood, source, COUNT(*) as count
+            FROM civic_data.city_data
+            WHERE neighborhood != 'Montgomery' AND source IN %s
+            GROUP BY neighborhood, source
+            ORDER BY count DESC
+            LIMIT 50
+        """, (tuple(selected_sources),))
+        if not neigh_df.empty:
+            # Aggregate to top 15 neighborhoods
+            top_15_neighs = neigh_df.groupby('neighborhood')['count'].sum().sort_values(ascending=False).head(15).index
+            neigh_df_filtered = neigh_df[neigh_df['neighborhood'].isin(top_15_neighs)]
+            fig_neigh = px.bar(neigh_df_filtered, x='neighborhood', y='count', color='source', 
+                               color_discrete_map={'code_violations': COLORS['housing'], 
+                                                   'building_permits': COLORS['infrastructure'], 
+                                                   'fire_incidents': COLORS['public_safety']})
+            st.plotly_chart(fig_neigh, use_container_width=True)
+            
+    with c2:
+        st.subheader("Timeline (Last 24 Months)")
+        timeline_df = run_query("""
+            SELECT date_trunc('month', reported_at) as month, source, COUNT(*) as count
+            FROM civic_data.city_data
+            WHERE reported_at >= %s AND source IN %s
+            GROUP BY month, source
+            ORDER BY month
+        """, (datetime.now() - timedelta(days=730), tuple(selected_sources)))
+        if not timeline_df.empty:
+            fig_time = px.line(timeline_df, x='month', y='count', color='source')
+            st.plotly_chart(fig_time, use_container_width=True)
+
+    st.subheader("Recent Activity (Latest 50)")
+    table_df = run_query("""
+        SELECT source, neighborhood, address, status, reported_at
+        FROM civic_data.city_data
+        WHERE source IN %s
+        ORDER BY reported_at DESC NULLS LAST
+        LIMIT 50
+    """, (tuple(selected_sources),))
+    if not table_df.empty:
+        st.dataframe(table_df, use_container_width=True)
 
 # --- FOOTER ---
 st.markdown("---")
@@ -312,3 +459,4 @@ st.markdown("<div style='text-align: center; color: #666;'>© 2026 Momentum MGM 
 # pandas
 # psycopg2-binary
 # plotly
+# google-genai
