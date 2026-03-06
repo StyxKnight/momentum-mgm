@@ -32,11 +32,12 @@ DB = {
 }
 
 SCHEDULES = {
-    "indeed":      timedelta(days=1),
-    "yelp":        timedelta(days=7),
-    "google_maps": timedelta(days=7),
-    "zillow":      timedelta(days=30),
-    "census":      timedelta(days=365),
+    "indeed":               timedelta(days=1),
+    "yelp":                 timedelta(days=7),
+    "google_maps":          timedelta(days=7),
+    "zillow":               timedelta(days=30),
+    "montgomery_opendata":  timedelta(days=1),   # 311/permits/fire — données fraîches quotidiennement
+    "census":               timedelta(days=365),
 }
 
 LAKE_SCRIPT = Path(__file__).parent / "lake.py"

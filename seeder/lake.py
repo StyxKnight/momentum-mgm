@@ -611,14 +611,228 @@ def collect_census(conn, run_id: str) -> tuple[int, int, int]:
     return collected, upserted, 0
 
 
+# ── Source: Montgomery Open Data (ArcGIS REST) ────────────────────────────────
+
+ARCGIS_BASE = "https://services7.arcgis.com/xNUwUjOJqYE54USz/ArcGIS/rest/services"
+
+# DECISION-002: zip code = seul proxy fiable pour quartiers Montgomery AL
+ZIP_TO_NEIGHBORHOOD = {
+    "36101": "Downtown",
+    "36104": "Downtown",
+    "36105": "West Side",
+    "36106": "Midtown",
+    "36107": "Garden District",
+    "36108": "West Side",
+    "36109": "East Montgomery",
+    "36110": "North Montgomery",
+    "36111": "Cloverdale",
+    "36112": "Maxwell/Gunter",
+    "36113": "West Side",
+    "36114": "North Montgomery",
+    "36115": "East Montgomery",
+    "36116": "East Montgomery",
+    "36117": "East Montgomery",
+    "36130": "Downtown",
+}
+
+ARCGIS_SOURCES = [
+    {
+        "name":         "code_violations",
+        "url":          f"{ARCGIS_BASE}/Code_Violations_view/FeatureServer/0",
+        "category":     "housing",
+        "where":        "1=1",
+        "lat_field":    None,           # ParcelNo_X/Y = non-WGS84, inutilisable
+        "lon_field":    None,
+        "addr_field":   "Address1",
+        "zip_field":    "Zip",
+        "status_field": "CaseStatus",
+        "date_field":   "CaseDate",
+        "type_field":   "CaseType",
+        "desc_field":   "ComplaintRem",
+    },
+    {
+        "name":         "building_permits",
+        "url":          f"{ARCGIS_BASE}/Building_Permit_viewlayer/FeatureServer/0",
+        "category":     "infrastructure",
+        "where":        "Year >= 2022",
+        "lat_field":    None,
+        "lon_field":    None,
+        "addr_field":   "PhysicalAddress",
+        "zip_field":    None,
+        "status_field": "PermitStatus",
+        "date_field":   "IssuedDate",
+        "type_field":   "PermitCode",
+        "desc_field":   "JobDescription",
+    },
+    {
+        "name":         "fire_incidents",
+        "url":          f"{ARCGIS_BASE}/Fire_Rescue_All_Incidents/FeatureServer/0",
+        "category":     "public_safety",
+        "where":        "1=1",
+        "lat_field":    None,           # 55k records — Nominatim serait 17h, on utilise zip de l'adresse
+        "lon_field":    None,
+        "addr_field":   "Location_Street_Address",
+        "zip_field":    None,
+        "status_field": None,
+        "date_field":   "Days_in_PSAP_Received_DateTime",
+        "type_field":   "Incident_Type",
+        "desc_field":   "Incident_Type_Category",
+    },
+]
+
+
+def _zip_from_address(address: str) -> Optional[str]:
+    """Extract 5-digit zip code from address string."""
+    import re
+    if not address:
+        return None
+    m = re.search(r'\b(36\d{3})\b', str(address))
+    return m.group(1) if m else None
+
+
+def _neighborhood_from_zip(zip_code: Optional[str]) -> str:
+    if not zip_code:
+        return "Montgomery"
+    return ZIP_TO_NEIGHBORHOOD.get(zip_code, "Montgomery")
+
+
+def _parse_arcgis_date(val) -> Optional[datetime]:
+    """ArcGIS dates = epoch milliseconds (int) or ISO string."""
+    if val is None:
+        return None
+    if isinstance(val, (int, float)) and val > 0:
+        try:
+            return datetime.fromtimestamp(val / 1000, tz=timezone.utc)
+        except Exception:
+            return None
+    if isinstance(val, str):
+        try:
+            return datetime.fromisoformat(val)
+        except Exception:
+            return None
+    return None
+
+
+def collect_montgomery_opendata(conn, run_id: str) -> tuple[int, int, int]:
+    """
+    Fetch Montgomery AL open data from ArcGIS REST FeatureServer (no auth required).
+    Sources:
+      - Code_Violations_view    → civic_data.city_data (category: housing)
+      - Building_Permit_viewlayer → civic_data.city_data (category: infrastructure)
+      - Fire_Rescue_All_Incidents → civic_data.city_data (category: public_safety)
+    Geocoding: fire incidents via Nominatim lat/lon; others via zip→neighborhood.
+    """
+    log.info("Collecting Montgomery Open Data from ArcGIS REST API...")
+    PAGE_SIZE   = 1000
+    MAX_RECORDS = 10000
+    total_collected = total_upserted = 0
+
+    for src in ARCGIS_SOURCES:
+        log.info(f"  [{src['name']}] fetching...")
+        offset = src_collected = src_upserted = 0
+
+        while offset < MAX_RECORDS:
+            try:
+                r = requests.get(
+                    f"{src['url']}/query",
+                    params={
+                        "where":             src["where"],
+                        "outFields":         "*",
+                        "orderByFields":     "OBJECTID DESC",
+                        "resultOffset":      offset,
+                        "resultRecordCount": PAGE_SIZE,
+                        "f":                 "json",
+                    },
+                    timeout=30,
+                )
+                data = r.json()
+            except Exception as e:
+                log.error(f"    {src['name']} fetch error at offset {offset}: {e}")
+                break
+
+            if "error" in data:
+                log.error(f"    {src['name']} API error: {data['error']}")
+                break
+
+            features = data.get("features", [])
+            if not features:
+                break
+
+            for feat in features:
+                attrs = feat.get("attributes", {})
+                objectid = str(attrs.get("OBJECTID", ""))
+
+                # Skip if already loaded (idempotent)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT 1 FROM civic_data.city_data "
+                        "WHERE source=%s AND raw_data->>'OBJECTID'=%s LIMIT 1",
+                        (src["name"], objectid),
+                    )
+                    if cur.fetchone():
+                        continue
+
+                # Coordinates + neighborhood
+                lat = attrs.get(src["lat_field"]) if src["lat_field"] else None
+                lon = attrs.get(src["lon_field"]) if src["lon_field"] else None
+
+                if lat and lon and -90 <= lat <= 90 and -180 <= lon <= 180:
+                    neighborhood = reverse_geocode(lat, lon)
+                elif src.get("zip_field") and attrs.get(src["zip_field"]):
+                    neighborhood = _neighborhood_from_zip(attrs[src["zip_field"]])
+                else:
+                    address = attrs.get(src["addr_field"], "")
+                    neighborhood = _neighborhood_from_zip(_zip_from_address(address))
+
+                address    = attrs.get(src["addr_field"], "")
+                status     = str(attrs.get(src["status_field"], "")) if src["status_field"] else ""
+                inc_type   = str(attrs.get(src["type_field"],   "") or "")
+                description = str(attrs.get(src["desc_field"],  "") or "")
+                reported_at = _parse_arcgis_date(attrs.get(src["date_field"]))
+
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """INSERT INTO civic_data.city_data
+                           (id, source, category, neighborhood, address,
+                            latitude, longitude, status, reported_at, raw_data, collected_at)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())""",
+                        (
+                            str(uuid.uuid4()), src["name"], src["category"],
+                            neighborhood, address, lat, lon,
+                            status, reported_at,
+                            json.dumps({k: str(v) for k, v in attrs.items()}),
+                        ),
+                    )
+                conn.commit()
+                src_upserted += 1
+
+            src_collected += len(features)
+            offset += len(features)
+
+            log.info(f"    {src['name']}: {src_collected} fetched so far...")
+
+            if len(features) < PAGE_SIZE:
+                break  # dernière page
+
+            time.sleep(0.2)  # poli avec l'API ArcGIS
+
+        log.info(f"  [{src['name']}] {src_collected} collected, {src_upserted} inserted")
+        total_collected += src_collected
+        total_upserted  += src_upserted
+
+    log.info(f"  Montgomery Open Data total: {total_upserted} rows inserted")
+    return total_collected, total_upserted, 0
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 SOURCES = {
-    "zillow":      ("async", collect_zillow),
-    "yelp":        ("async", collect_yelp),
-    "google_maps": ("async", collect_google_maps),
-    "indeed":      ("async", collect_indeed),
-    "census":      ("sync",  collect_census),
+    "zillow":             ("async", collect_zillow),
+    "yelp":               ("async", collect_yelp),
+    "google_maps":        ("async", collect_google_maps),
+    "indeed":             ("async", collect_indeed),
+    "census":             ("sync",  collect_census),
+    "montgomery_opendata": ("sync", collect_montgomery_opendata),
 }
 
 
@@ -633,7 +847,7 @@ async def run_async_source(name, fn, conn, run_id, do_embed):
 def main():
     parser = argparse.ArgumentParser(description="Momentum MGM — Data Lake Collector")
     parser.add_argument("--source", default="all",
-                        choices=list(SOURCES.keys()) + ["all"],
+                        choices=list(SOURCES.keys()) + ["all", "opendata"],
                         help="Data source to collect")
     parser.add_argument("--embed", action="store_true",
                         help="Generate pgvector embeddings (requires Google API key)")

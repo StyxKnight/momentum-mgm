@@ -134,6 +134,31 @@ CREATE TABLE IF NOT EXISTS civic_data.siphon_runs (
     completed_at      TIMESTAMP
 );
 
+-- ── City Open Data (code violations, permits, fire incidents) ────────────────
+CREATE TABLE IF NOT EXISTS civic_data.city_data (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source       VARCHAR,        -- 'code_violations' | 'building_permits' | 'fire_incidents'
+    category     VARCHAR,        -- civic category (10 catégories)
+    neighborhood VARCHAR,
+    address      TEXT,
+    latitude     FLOAT,
+    longitude    FLOAT,
+    status       VARCHAR,
+    reported_at  TIMESTAMP WITH TIME ZONE,
+    raw_data     JSONB,
+    collected_at TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_city_data_source       ON civic_data.city_data (source);
+CREATE INDEX IF NOT EXISTS idx_city_data_neighborhood  ON civic_data.city_data (neighborhood);
+CREATE INDEX IF NOT EXISTS idx_city_data_category      ON civic_data.city_data (category);
+CREATE INDEX IF NOT EXISTS idx_city_data_reported_at   ON civic_data.city_data (reported_at);
+CREATE INDEX IF NOT EXISTS idx_city_data_raw_objectid  ON civic_data.city_data ((raw_data->>'OBJECTID'));
+-- Populated by: lake.py --source montgomery_opendata (refresh: siphon.py daily)
+-- ArcGIS REST FeatureServer: services7.arcgis.com/xNUwUjOJqYE54USz (public, no auth)
+--   Code_Violations_view       → housing        (~10k rows)
+--   Building_Permit_viewlayer  → infrastructure (~5.6k rows, 2022+)
+--   Fire_Rescue_All_Incidents  → public_safety  (~10k most recent of 55k total)
+
 -- ── Neighborhoods populated dynamically by lake.py ──────────────────────────
 -- DO NOT seed manually — neighborhood names come from Nominatim reverse geocoding
 -- (lat/lon → suburb name). Census tract IDs come from Census API responses.
