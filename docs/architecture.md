@@ -117,16 +117,27 @@ Momentum MGM is a civic intelligence platform built on three layers:
 - MCP server with 6 tools (Decidim layer)
 - All docs audited and divergences documented
 
-## What Is Being Built (Day 3-4 🔄)
+## What Is Built (Day 3-4 ✅)
 
-- `database/002_civic_data_lake.sql` — civic_data schema + pgvector
-- `seeder/lake.py` — initial data collection (Zillow, Yelp, GMaps, Indeed, Census)
+- `database/002_civic_data_lake.sql` — civic_data schema + pgvector deployed
+- `seeder/lake.py` — initial data collection: Census ACS 11,334 rows ✅, Zillow 500 ✅, Yelp 500 ✅
 - `seeder/siphon.py` — incremental refresh pipeline
 - systemd timer for automated siphon
-- MCP tools 7-10 (neighborhood intelligence, semantic search, velocity, find_solutions)
-- Claude Desktop end-to-end test
+- MCP tools 7-10 (neighborhood intelligence, semantic search, velocity, find_solutions) ✅
+- 1,000 embeddings (gemini-embedding-001, 3072d) ✅
 
-## What Is NOT Yet Built (planned Day 4-5)
+## What Is Built (Day 5 ✅)
+
+- Decidim fully structured — lorem ipsum eliminated, real civic content
+  - 2 assemblies renamed: "Envision Montgomery 2040 — Citizens Forum" + "Montgomery Community Development Fund"
+  - Dates added to all 10 processes (2026-01-01 → 2026-12-31)
+  - 5 blog posts anchored in real Montgomery data ($36.6M West Side grant, Envision 2040, CDBG)
+  - Participatory budget: $2.7M CDBG/HOME/ESG real federal allocation, 7 real Montgomery programs
+  - 13 surveys / 59 questions grounded in real Montgomery civic issues
+- Data lake coverage gaps identified and documented (see data_lake.md)
+- `seeder/cleanup_decidim.rb` — Decidim enrichment script (rerunnable)
+
+## What Is NOT Yet Built (planned Day 5-6)
 
 - **Pol.is integration** — opinion clustering (decidim-polis gem)
 - **Auto-classification on submission** — Sidekiq job on citizen proposal submit

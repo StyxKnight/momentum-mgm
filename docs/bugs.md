@@ -348,3 +348,43 @@ Recorded during Day 2 full doc audit. These are intentional deviations from orig
 - **Note:** Gemini Pro 3.0 présente la même limitation — se présente comme Gemini 2.0 pour la même raison (cutoff dataset identique). Universel aux LLMs, pas spécifique à Claude.
 
 *Last updated: 2026-03-06*
+
+---
+
+### [BUG-026] Decidim::Forms::AnswerOption — classe inexistante dans Decidim 0.31
+- **Date:** 2026-03-06
+- **Severity:** Medium
+- **Status:** Fixed
+- **Symptom:** `uninitialized constant Decidim::Forms::AnswerOption` dans le seeder survey.
+- **Root Cause:** La classe `AnswerOption` a été renommée `ResponseOption` dans Decidim 0.31. Les exemples en ligne et anciennes docs utilisent encore `AnswerOption`.
+- **Fix:** Remplacer `Decidim::Forms::AnswerOption` → `Decidim::Forms::ResponseOption` et l'association `question.answer_options` → `question.response_options`.
+- **Lesson:** Toujours vérifier les noms réels avec `Decidim::Forms.constants` avant de coder. Ne pas faire confiance aux exemples en ligne — Decidim change souvent les noms entre versions.
+
+### [BUG-027] Decidim::Surveys::Survey.create! — validation questionnaire requis
+- **Date:** 2026-03-06
+- **Severity:** Medium
+- **Status:** Fixed
+- **Symptom:** `Validation failed: Questionnaire cannot be blank` sur `Survey.create!(decidim_component_id: comp.id)`.
+- **Root Cause:** `Decidim::Surveys::Survey` valide la présence d'un questionnaire au moment de la création. Mais le questionnaire doit être créé séparément avec `questionnaire_for: survey` — cercle de dépendance.
+- **Fix:** Créer le Survey avec `save!(validate: false)` pour bypasser la validation, puis créer le `Decidim::Forms::Questionnaire` avec `questionnaire_for: survey`. L'association est alors complète.
+- **Lesson:** Pattern: `survey = Survey.new(...).tap { |s| s.save!(validate: false) }` puis `Questionnaire.create!(questionnaire_for: survey, ...)`.
+
+### [BUG-028] Decidim::Budgets::Project — pas de decidim_component_id direct
+- **Date:** 2026-03-06
+- **Severity:** Low
+- **Status:** Fixed
+- **Symptom:** `unknown attribute 'decidim_component_id' for Decidim::Budgets::Project`.
+- **Root Cause:** `Project` appartient à un `Budget` (via `decidim_budgets_budget_id`), pas directement à un `Component`. Le component_id s'hérite via le `Budget`. Passer `decidim_component_id` au Project est une erreur de modèle.
+- **Fix:** Retirer `decidim_component_id` du `Project.create!`. Seul `Budget.create!(decidim_component_id: ...)` prend ce paramètre.
+- **Lesson:** Hiérarchie Decidim Budgets: `Component → Budget → Project`. Le component_id se met sur le Budget, pas sur les Projects.
+
+### [BUG-029] Decidim::Forms::Question — types invalides dans Decidim 0.31
+- **Date:** 2026-03-06
+- **Severity:** Medium
+- **Status:** Fixed
+- **Symptom:** `Validation failed: Question type is not included in the list` pour les types `short_answer` et `long_answer`.
+- **Root Cause:** Les types ont changé de nom dans Decidim 0.31. `short_answer` → `short_response`, `long_answer` → `long_response`.
+- **Fix:** Utiliser les vrais types. Liste complète via `Decidim::Forms::Question::QUESTION_TYPES` : `["short_response", "long_response", "single_option", "multiple_option", "sorting", "files", "matrix_single", "matrix_multiple"]`.
+- **Lesson:** Toujours valider les types avec `QUESTION_TYPES` avant de coder. Les exemples en ligne utilisent les anciens noms.
+
+*Last updated: 2026-03-06*

@@ -481,3 +481,113 @@ Embedding model: `gemini-embedding-001` via Google GenAI API (3072 dimensions, M
 ---
 
 *Last updated: 2026-03-06*
+
+---
+
+## Data Lake Expansion Plan — Coverage Gaps by Civic Category
+
+**Constat (2026-03-06):** Le data lake actuel couvre bien le Census ACS et partiellement Yelp/Zillow, mais n'a pas de couverture dédiée pour 7 des 10 catégories civiques. Chaque catégorie a besoin d'un **minimum viable de données réelles** pour que les MCP tools `get_neighborhood_intelligence` et `find_solutions` soient vraiment utiles.
+
+### Couverture actuelle par catégorie
+
+| Catégorie | Census ACS | Zillow | Yelp | Manque critique |
+|---|---|---|---|---|
+| Housing | ✅ poverty, rent, vacancy | ✅ 500 props (geocoding imprécis) | ⚠️ partiel | Permis de construire, évictions |
+| Economy | ✅ income, unemployment | ❌ | ✅ businesses | Indeed (0 rows), emplois par industrie |
+| Infrastructure | ✅ population trends | ❌ | ❌ | 311 requests, permis de travaux |
+| Health | ✅ poverty (proxy) | ❌ | ⚠️ (gyms, dentistes) | Cliniques, pharmacies géolocalisées |
+| Education | ✅ edu_bachelors_plus | ❌ | ❌ | Écoles, résultats scolaires |
+| Environment | ❌ | ❌ | ❌ | Qualité eau/air, zones inondables FEMA |
+| Transportation | ❌ | ❌ | ❌ | Arrêts MAX Bus, fréquence routes |
+| Public Safety | ❌ | ❌ | ❌ | Incidents crime par quartier |
+| Parks & Culture | ❌ | ❌ | ⚠️ (museums) | Parcs géolocalisés, équipements |
+| Governance | ❌ | ❌ | ❌ | Procès-verbaux conseil, votes |
+
+### Sources prioritaires à intégrer
+
+#### Tier 1 — Impact maximal, accessible maintenant
+
+**Montgomery Open Data Portal** (`opendata.montgomeryal.gov`)
+- 311 Service Requests — incidents par quartier, type, temps de résolution → Infrastructure + Governance
+- Crime incidents — par quartier, type, date → Public Safety
+- Construction/building permits — → Housing + Infrastructure
+- Code enforcement violations — logements insalubres par quartier → Housing
+
+**Census ACS supplémentaire** (déjà le pipeline, juste ajouter les variables)
+- `B08301` — Means of transportation to work → Transportation
+- `B19083` — Gini coefficient → Economy (inégalité)
+- `B25071` — Median gross rent as % of household income → Housing cost burden
+- `B27001` — Health insurance coverage → Health
+
+**Yelp — catégories manquantes** (même pipeline, élargir la recherche)
+- Grocery stores, supermarkets → Environment (food deserts)
+- Hospitals, urgent care, clinics → Health
+- Schools, tutoring → Education
+- Parks, recreation → Parks & Culture
+- Bus stops (si Yelp les a) → Transportation
+
+#### Tier 2 — Fort impact, requiert setup
+
+**Bright Data — nouveaux datasets à scrapper**
+- `Google Maps Places` (une fois BUG-025 résolu via Places API) — parcs, arrêts de bus, écoles, cliniques avec horaires et reviews
+- `Zillow Rental Listings` — loyers actuels par quartier (complémente les ventes)
+- `Apartment.com / Rent.com` — offre locative abordable
+- `LinkedIn Job Postings` (via Bright Data) — emplois par industrie/quartier → Economy
+
+**Sources gouvernementales gratuites**
+- EPA AirNow API — qualité de l'air par zip code → Environment
+- FEMA Flood Map Service Center API — zones inondables par adresse → Environment + Housing
+- Alabama Report Card (`reportcard.alsde.edu`) — résultats scolaires par école → Education
+- Bureau of Labor Statistics API — emploi par industrie, Montgomery MSA → Economy
+- GTFS Montgomery MAX Bus — stops, routes, fréquences → Transportation
+
+#### Tier 3 — Nice-to-have
+
+- City Council meeting minutes (scraping montgomeryal.gov) → Governance
+- USDA Food Access Research Atlas → Environment (food deserts officiels)
+- HUD Fair Market Rents → Housing
+- Glassdoor companies (Bright Data dataset déjà listé) → Economy
+
+### Minimum Viable Coverage par catégorie
+
+Pour que chaque MCP tool soit significatif, voici le minimum requis :
+
+```
+infrastructure:   Census + 311 requests + building permits
+environment:      Census + Yelp groceries + EPA air + FEMA flood
+housing:          Census + Zillow (geocoding fixé) + building permits + evictions
+public_safety:    Census + crime incidents OpenData
+transportation:   Census + GTFS MAX Bus stops/routes
+health:           Census + Yelp clinics/hospitals + ACS health insurance
+education:        Census + Yelp schools + AL Report Card
+economy:          Census + Yelp businesses + Indeed jobs (quand fixé)
+parks_culture:    Census + Yelp parks/museums + Google Maps (quand fixé)
+governance:       Census + 311 + council minutes
+```
+
+### Fix prioritaire — Zillow geocoding
+
+493/500 propriétés Zillow sont mappées à "Montgomery County" au lieu du quartier précis. Les lat/lon sont présents. Fix: passer chaque propriété par Nominatim reverse geocoding (1 req/sec) pour obtenir le `suburb` → mettre à jour `neighborhood`. ~8 minutes de processing sur les 500.
+
+### Nouvelle table suggérée: `civic_data.incidents`
+
+Pour les données 311 + crime + code violations — format unifié :
+
+```sql
+CREATE TABLE civic_data.incidents (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source        VARCHAR,          -- '311', 'crime', 'code_enforcement'
+  incident_type VARCHAR,
+  category      VARCHAR,          -- civic category (10 catégories)
+  neighborhood  VARCHAR,
+  latitude      FLOAT,
+  longitude     FLOAT,
+  reported_at   TIMESTAMP,
+  resolved_at   TIMESTAMP,
+  status        VARCHAR,
+  raw_data      JSONB,
+  collected_at  TIMESTAMP DEFAULT now()
+);
+```
+
+*Last updated: 2026-03-06*
