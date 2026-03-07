@@ -118,6 +118,10 @@ SOURCE_CATEGORY_MAP = {
     "parks_recreation":      "parks_culture",
     "city_owned_property":   "governance",
     "zoning_decisions":      "governance",
+    "business_licenses":     "economy",
+    "historic_markers":      "parks_culture",
+    "community_centers":     "parks_culture",
+    "education_facility":    "education",
 }
 
 
