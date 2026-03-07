@@ -116,6 +116,8 @@ SOURCE_CATEGORY_MAP = {
     "opportunity_zones":     "economy",
     "infrastructure_projects":"infrastructure",
     "parks_recreation":      "parks_culture",
+    "city_owned_property":   "governance",
+    "zoning_decisions":      "governance",
 }
 
 
