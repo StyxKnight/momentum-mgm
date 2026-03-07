@@ -26,6 +26,28 @@ def _render(template_name: str, **kwargs) -> str:
     return _jinja.get_template(template_name).render(**kwargs)
 
 
+async def _brave_search(query: str, count: int = 5) -> list:
+    """Brave Search API — returns list of {title, url, description}."""
+    import httpx
+    key = os.getenv("BRAVE_API_KEY")
+    if not key:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                "https://api.search.brave.com/res/v1/web/search",
+                params={"q": query, "count": count, "text_decorations": False},
+                headers={"X-Subscription-Token": key, "Accept": "application/json"},
+            )
+            data = r.json()
+            return [
+                {"title": w.get("title", ""), "url": w.get("url", ""), "description": w.get("description", "")}
+                for w in data.get("web", {}).get("results", [])
+            ]
+    except Exception:
+        return []
+
+
 async def _generate_json(prompt: str, temperature: float = 0.1) -> str:
     """Gemini 2.5 Flash primary (direct API), Grok-4 via OpenRouter fallback."""
     import asyncio
@@ -711,50 +733,53 @@ def get_business_health(neighborhood: str = None) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-# ── TOOL 12 ────────────────────────────────────────────────────────────────────
+# ── TOOL 12 — find_solutions ────────────────────────────────────────────────────
 @mcp.tool()
 async def find_solutions(problem: str, neighborhood: str = None) -> str:
     """
-    Given a civic problem in Montgomery, find concrete solutions:
-    federal grant programs (HUD, CDBG, EPA, DOT), comparable cities that solved
-    similar issues, and specific recommendations for Montgomery's context.
-    Examples: 'high vacancy rate in West Montgomery', 'youth unemployment in North Montgomery'
+    Given a civic problem in Montgomery, find concrete solutions using real-time web search.
+    Searches for: active federal grant programs (HUD, CDBG, EPA, DOT), global best practices
+    from cities that solved similar issues, and Montgomery-specific opportunities.
+    Uses Brave Search API for live results + real Census data for Montgomery context.
+    Examples: 'high vacancy rate', 'youth unemployment', 'food deserts', 'housing blight'
     """
-    context = f"Neighborhood: {neighborhood}" if neighborhood else "City-wide (Montgomery, AL)"
-    prompt = f"""You are a civic policy expert advising the City of Montgomery, Alabama.
+    import asyncio
 
-Problem: {problem}
-Context: {context}
-Montgomery facts: population ~200K, median income ~$47K, poverty rate ~22%, 71 census tracts.
+    # ── Real Montgomery stats from Census ───────────────────────────────────────
+    conn = get_db()
+    city_stats = {}
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT metric, ROUND(AVG(value)::numeric, 1) as val
+            FROM civic_data.census
+            WHERE year = (SELECT MAX(year) FROM civic_data.census)
+              AND metric IN ('median_income','poverty_below','unemployed','housing_vacant','median_rent')
+              AND value > 0
+            GROUP BY metric
+        """)
+        city_stats = {r[0]: float(r[1]) for r in cur.fetchall()}
+    conn.close()
 
-Provide actionable solutions in JSON:
-{{
-  "federal_programs": [
-    {{
-      "name": "Program name",
-      "agency": "HUD / EPA / DOT / USDA / etc.",
-      "description": "What it funds",
-      "eligibility": "Key eligibility criteria",
-      "typical_grant": "$X - $Y",
-      "apply_url_hint": "Where to find application info"
-    }}
-  ],
-  "comparable_cities": [
-    {{
-      "city": "City, State",
-      "problem_solved": "Similar issue they addressed",
-      "approach": "What they did",
-      "outcome": "Measurable result"
-    }}
-  ],
-  "montgomery_recommendations": [
-    "Specific actionable step 1",
-    "Specific actionable step 2",
-    "Specific actionable step 3"
-  ],
-  "urgency": "high|medium|low",
-  "estimated_timeline": "X months/years to see impact"
-}}"""
+    # ── 3 parallel Brave searches ───────────────────────────────────────────────
+    federal_q   = f"{problem} federal grant program HUD EPA DOT USDA CDBG active 2025 2026"
+    global_q    = f"cities solved \"{problem}\" best practices results worldwide"
+    local_q     = f"Montgomery Alabama {problem} funding solution program"
+
+    federal_res, global_res, local_res = await asyncio.gather(
+        _brave_search(federal_q, count=5),
+        _brave_search(global_q, count=5),
+        _brave_search(local_q, count=3),
+    )
+
+    # ── Render Jinja2 prompt ────────────────────────────────────────────────────
+    prompt = _render("find_solutions.j2",
+        problem=problem,
+        neighborhood=neighborhood,
+        city_stats=city_stats,
+        federal_results=federal_res,
+        global_results=global_res,
+        local_results=local_res,
+    )
 
     return await _generate_json(prompt, temperature=0.4)
 

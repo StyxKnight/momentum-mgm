@@ -1,0 +1,77 @@
+{% extends "base.j2" %}
+
+[TASK]
+You are a civic policy expert advising the City of Montgomery, Alabama.
+Find concrete, actionable solutions for the following problem.
+
+Problem: {{ problem }}
+{% if neighborhood %}Geographic focus: {{ neighborhood }}{% else %}Geographic focus: City-wide (Montgomery, AL){% endif %}
+
+[DATA — Montgomery real statistics (Census ACS, latest year)]
+{{ city_stats | tojson(indent=2) }}
+[/DATA]
+
+[SEARCH RESULTS — Federal grant programs (live web search)]
+{% for r in federal_results %}
+- {{ r.title }}
+  {{ r.description }}
+  {{ r.url }}
+{% else %}
+No results found.
+{% endfor %}
+
+[SEARCH RESULTS — Global best practices from cities worldwide]
+{% for r in global_results %}
+- {{ r.title }}
+  {{ r.description }}
+  {{ r.url }}
+{% else %}
+No results found.
+{% endfor %}
+
+[SEARCH RESULTS — Montgomery-specific programs and context]
+{% for r in local_results %}
+- {{ r.title }}
+  {{ r.description }}
+  {{ r.url }}
+{% else %}
+No results found.
+{% endfor %}
+
+[INSTRUCTIONS]
+Using ONLY the search results above as your source for federal programs and comparable cities:
+- Federal programs must appear in the search results above — do not invent programs.
+- Comparable cities must appear in the search results above — do not invent examples.
+- Montgomery recommendations must be grounded in the real statistics from DATA.
+- If search results are sparse, return fewer items rather than hallucinating.
+
+[OUTPUT SCHEMA]
+{
+  "federal_programs": [
+    {
+      "name": "Program name from search results",
+      "agency": "HUD / EPA / DOT / USDA / etc.",
+      "description": "What it funds",
+      "eligibility": "Key eligibility criteria relevant to Montgomery AL",
+      "typical_grant": "$X - $Y",
+      "source_url": "URL from search results"
+    }
+  ],
+  "comparable_cities": [
+    {
+      "city": "City, State or Country",
+      "problem_solved": "Similar issue they addressed",
+      "approach": "What they did",
+      "outcome": "Measurable result",
+      "source_url": "URL from search results"
+    }
+  ],
+  "montgomery_recommendations": [
+    "Specific actionable step grounded in real Montgomery statistics above",
+    "Step 2",
+    "Step 3"
+  ],
+  "urgency": "high|medium|low",
+  "estimated_timeline": "X months/years to see impact",
+  "search_grounded": true
+}
