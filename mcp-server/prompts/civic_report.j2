@@ -1,0 +1,38 @@
+{% extends "base.j2" %}
+
+[DATA]
+{{ data | tojson(indent=2) }}
+[/DATA]
+
+[CHAIN OF THOUGHT]
+Before writing findings, reason through the data step by step:
+1. Read each Census metric: note direction (slope sign) and reliability (R²). Skip R² < 0.5.
+2. Cross-reference: do declining income + high violations + high poverty form a compounding pattern?
+3. Check business health: closed rate > 20% signals economic stress.
+4. Read deprivation scores: which index is highest? What are the top 3 driving factors?
+5. Identify 3 to 5 distinct factual findings. Each must cite a specific number from DATA.
+6. Assign overall severity using quartile thresholds (ADI/SVI standard):
+   critical = score > 0.75 on 2+ indices (top quartile, worse than 75% of Montgomery neighborhoods)
+   high     = score 0.50–0.75 on 2+ indices (above median)
+   moderate = score 0.25–0.50
+   low      = score < 0.25
+   Business closure rate: > 15% = commercial distress (LISC standard).
+
+[OUTPUT SCHEMA]
+{
+  "neighborhood": "{{ neighborhood }}",
+  "overall_severity": "critical|high|moderate|low",
+  "severity_rationale": "One sentence citing the specific scores that justify this rating.",
+  "findings": [
+    {
+      "category": "housing|economy|environment|public_safety|health|infrastructure",
+      "finding": "One factual sentence citing a specific number from DATA.",
+      "metric_cited": "variable name",
+      "value": "raw value from DATA",
+      "trend": "improving|declining|stable|unknown"
+    }
+  ],
+  "strongest_signal": "The single most statistically reliable finding (highest R² or largest z-score deviation).",
+  "data_confidence": "high|moderate|low",
+  "confidence_note": "Brief note on variables_used vs variables_expected across indices."
+}

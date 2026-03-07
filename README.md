@@ -2,96 +2,126 @@
 
 > **Civic AI Platform for Montgomery, Alabama**
 > World Wide Vibes Hackathon — March 5–9, 2026
-> Inspired by Decidim (Barcelona) · Powered by AI
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Active Development](https://img.shields.io/badge/status-active-brightgreen)]()
 [![Live](https://img.shields.io/badge/demo-mgm.styxcore.dev-blue)]()
 
 ---
 
 ## What is Momentum MGM?
 
-Montgomery has no digital channel between citizens and city hall. Mayor Reed announces priorities at press conferences. Citizens respond... nowhere.
+Montgomery has no digital channel between citizens and city hall.
 
-**Momentum MGM** is a civic participation platform — the same type used by Barcelona (40,000 participants), Quebec City, Montreal, and Brazil (36,000 proposals processed with AI) — deployed for Montgomery, Alabama, and extended with an AI layer that lets city administrators literally *talk to their city* through Claude.
+**Momentum MGM** is the same type of civic participation platform used by:
 
-Citizens submit proposals in plain language. AI classifies them across 10 civic categories. A live dashboard shows city hall what citizens actually care about. And an AI admin bridge (via MCP) lets decision-makers query, analyze, and act on citizen input in real time.
+- **Barcelona** — Decidim live since 2016. 38 active participatory processes in 2024. 10,000+ citizen proposals shaped the city's strategic plan. Now used by 450+ organizations in 30+ countries.
+- **Brazil** — Brasil Participativo: 1.5 million registered citizens, 7.5 million visits. 8,254 proposals during the 2024–2027 national plan process — 76% incorporated by government. Brazil is building an open-source AI system to process all incoming citizen input — launch planned for early 2026.
+- **Taiwan** — vTaiwan + Pol.is: 28+ policy cases deliberated, 80% resulted in real government action. 4,000+ citizens produced Uber regulation consensus via Pol.is that became law.
 
-**The gap this fills:** Envision Montgomery 2040 + Reed's "Momentum" theme (State of the City 2026) describe exactly this kind of civic engagement infrastructure. It doesn't exist yet. We built it.
+**Montgomery doesn't have this. We built it — and added the AI layer that Brazil is still working toward.**
 
 ---
 
-## Architecture Overview
+## Architecture
 
 ```
-LAYER 1 — PLATFORM (Decidim, native on ARM64)
-  Citizens → Decidim UI → proposals, votes, comments
-  Admin → Decidim dashboard → full participation management
+LAYER 1 — CITIZEN PLATFORM (Decidim 0.31.2, live at mgm.styxcore.dev)
+  Citizens submit proposals, vote, comment across 10 civic categories
+  Raspberry Pi 5 ARM64, native Ruby on Rails, Cloudflare tunnel
 
-LAYER 2 — SEEDER (Bright Data → Python → Decidim)
-  scrape.py: Bright Data SDK scrapes montgomeryal.gov + SERP
-  seed.py: Grok-4-Fast generates proposals → Rails runner inserts
-  60+ seeded proposals across 10 civic categories (real Montgomery context)
+LAYER 2 — CIVIC DATA LAKE (real Montgomery open data, PostgreSQL + pgvector)
 
-LAYER 3 — CIVIC DATA LAKE (Bright Data SDK + Census ACS + pgvector)
-  lake.py:   initial collection from Zillow, Yelp, Google Maps, Indeed, Census
-  siphon.py: incremental refresh (daily/weekly/monthly via systemd timer)
-  PostgreSQL civic_data schema + pgvector 1536d embeddings
-  ~5000 records: properties, businesses, reviews, jobs, 14 years of Census data
+  civic_data.city_data — Montgomery ArcGIS Open Data (44,608 records total):
+    fire_incidents          20,000
+    code_violations         10,000
+    building_permits         5,619
+    housing_condition        5,561
+    transit_stops            1,613
+    food_safety              1,337
+    environmental_nuisance     330
+    education_facilities        97
+    citizen_reports             16
+    behavioral_centers          13
+    opportunity_zones           12
+    infrastructure_projects     10
 
-LAYER 4 — AI ADMIN BRIDGE (MCP Server, 9 tools, Claude Desktop)
-  9 tools exposed to Claude Desktop:
-  - get_proposals()              → citizen voice (Decidim)
-  - classify_proposal()         → AI classification
-  - analyze_trends()            → platform analytics
-  - recommend_action()          → city advisory + 311 routing
-  - get_platform_summary()      → full Decidim snapshot
-  - get_montgomery_context()    → scraped city data lookup
-  - get_neighborhood_intelligence() → multi-source neighborhood report
-  - semantic_civic_search()     → pgvector RAG across all data
-  - get_neighborhood_velocity() → trend + projection (improving/declining)
-  - find_solutions()            → federal programs + comparable cities
-                                   + Montgomery-specific recommendations
+  civic_data.census       — Census ACS 5-year estimates: 11,334 rows, 2012–2024, 71 tracts
+  civic_data.businesses   — Yelp via Bright Data: 500 businesses
+  civic_data.properties   — Zillow: 500 properties
+  civic_data.embeddings   — pgvector (gemini-embedding-001, 3072d): 1,000 embeddings
 
-  Full governance loop:
-  detect (velocity) → understand (intelligence) → find solutions → act
-
-  Mayor asks: "What's happening in West Montgomery and what do we do?"
-  Claude: 14yr Census trend + Zillow/Yelp/Indeed + citizen proposals
-        + velocity regression + federal grant opportunities → act
+LAYER 3 — MCP SERVER (12 tools, Python FastMCP, stdio transport)
+  Connects Claude Desktop directly to Decidim + the data lake.
+  City administrators query their city in plain language.
 ```
 
 ---
 
-## Proof of Concept
+## The Governance Loop
 
-| Platform | City | Scale | Notes |
-|---|---|---|---|
-| Decidim | Barcelona | 40,000 participants, 10,000+ proposals | Original deployment |
-| Decidim | Quebec City | Active | French-language civic engagement |
-| Decidim | Montreal | Active | Major Canadian city |
-| Brasil Participativo | Brazil (national) | 36,000 proposals | AI-classified with BERTopic + LLM |
-| vTaiwan + Pol.is | Taiwan | National policy | Opinion clustering → real legislation |
+```
+DETECT     get_census_trend()         14 years of Census ACS OLS regression per neighborhood
+           get_city_incidents()       12 ArcGIS sources, neighborhood-filtered, status breakdown
 
-Montgomery doesn't have this. We built it.
+UNDERSTAND get_neighborhood_intelligence()  Census + Zillow + Yelp aggregated report
+           semantic_civic_search()         pgvector cosine similarity across all civic data
+           get_business_health()           Yelp closure rates, avg rating, foot traffic proxy
+
+FIND       find_solutions()           Federal programs (HUD, CDBG, EPA, DOT) + comparable cities
+           get_proposals()            What citizens are already asking for
+
+ACT        recommend_action()         Concrete step + department + 311 service type
+           classify_proposal()        AI classification into 10 civic categories
+```
+
+**Example query from city hall:**
+> "What is happening in West Montgomery and what can we do about it?"
+
+Claude calls `get_census_trend()` → 14 years of income, poverty, vacancy, unemployment, rent with slope per year and R² confidence. Then `get_city_incidents()` → code violations, fire incidents, housing conditions, food safety scores. Then `get_neighborhood_intelligence()` → Zillow prices, Yelp closures, business health. Then `find_solutions()` → matching federal grant programs (HUD Choice Neighborhoods, CDBG, EPA Brownfields) and comparable cities that solved similar problems. All real data. No hallucination.
+
+---
+
+## MCP Tools (12)
+
+| Tool | Description |
+|---|---|
+| `get_proposals` | Citizen proposals from Decidim, filterable by category |
+| `classify_proposal` | AI classification into 10 civic categories + 311 routing |
+| `analyze_trends` | Proposal volume and top issues by votes |
+| `recommend_action` | Concrete city administration action + department + 311 service type |
+| `get_platform_summary` | Full Decidim platform snapshot |
+| `get_montgomery_context` | Scraped Montgomery city data lookup |
+| `get_neighborhood_intelligence` | Census + Zillow + Yelp multi-source aggregated report |
+| `semantic_civic_search` | pgvector cosine similarity search across all civic data |
+| `get_census_trend` | 14yr OLS regression per metric, projection to 2026, R² confidence |
+| `get_city_incidents` | 12 ArcGIS sources: counts, status breakdown, date range |
+| `get_business_health` | Yelp closure rate, avg rating, top categories by neighborhood |
+| `find_solutions` | Federal programs + comparable cities + Montgomery-specific recommendations |
+
+---
+
+## Why No Existing Civic Platform Has This
+
+Barcelona's Decidim doesn't have an AI admin bridge. Brazil's doesn't. Montreal's doesn't. The MCP server is what makes Momentum MGM a different category of product — not another Decidim deployment, but Decidim extended with a live civic intelligence layer that city administrators can query in plain language through Claude.
+
+Brazil is building toward this. We shipped it.
 
 ---
 
 ## Tech Stack
 
-| Component | Technology | Notes |
-|---|---|---|
-| Civic Platform | Decidim 0.31 (Ruby on Rails) | Native install on ARM64 Debian |
-| Database | PostgreSQL 15 (native) | `momentum` database on 127.0.0.1:5432 |
-| Cache / Jobs | Redis 7 (Docker) | Sidekiq background jobs |
-| AI — Generation | Grok-4-Fast via OpenRouter | Proposal generation + classification |
-| AI — Fallback | Gemini 2.5 Flash (Google) | Automatic fallback if OpenRouter fails |
-| Data Scraping | Bright Data SDK | montgomeryal.gov + Google SERP |
-| MCP Server | Python (FastMCP stdio) | Claude Desktop ↔ Decidim bridge |
-| Reverse Proxy | Nginx | mgm.styxcore.dev → localhost:3000 |
-| Tunnel | Cloudflare | Public exposure via existing tunnel |
-| Domain | styxcore.dev (owned) | Subdomain mgm. |
+| Component | Technology |
+|---|---|
+| Civic Platform | Decidim 0.31.2 (Ruby on Rails, native ARM64) |
+| Database | PostgreSQL 15 + pgvector |
+| AI — Classification | Gemini Flash via OpenRouter |
+| AI — Solutions | Grok-4 via OpenRouter |
+| AI — Embeddings | gemini-embedding-001 (3072d, Matryoshka, Google GenAI) |
+| Data — City | Montgomery ArcGIS Open Data (no auth, REST pipeline) |
+| Data — Census | US Census ACS API (free, 2012–2024) |
+| Data — Private | Bright Data SDK (Zillow, Yelp) |
+| MCP Server | Python 3.12, FastMCP, stdio transport |
+| Infrastructure | Raspberry Pi 5 8GB, NVMe SSD, Nginx, Cloudflare tunnel |
 
 ---
 
@@ -99,56 +129,40 @@ Montgomery doesn't have this. We built it.
 
 ```
 momentum-mgm/
-├── README.md
-├── docs/
-│   ├── how_it_works.md    ← Full technical explanation (start here)
-│   ├── architecture.md    ← System design + diagrams
-│   ├── backend.md         ← MCP server + seeder details
-│   ├── data.md            ← DB schema overview
-│   ├── data_lake.md       ← Data lake full plan (sources, schema, siphon)
-│   ├── bugs.md            ← Issues log + architecture divergences
-│   ├── api.md             ← Decidim GraphQL API reference
-│   └── presentation/
-│       └── pitch-deck.md  ← Hackathon pitch
+├── mcp-server/
+│   ├── server.py          ← 12 MCP tools
+│   ├── decidim_client.py  ← Decidim GraphQL client
+│   └── requirements.txt
 ├── database/
 │   └── 002_civic_data_lake.sql  ← civic_data schema + pgvector
 ├── seeder/
-│   ├── venv/              ← Python virtualenv
-│   ├── scrape.py          ← Bright Data → raw JSON (city context)
-│   ├── seed.py            ← AI generation + Rails runner insertion
-│   ├── lake.py            ← Data lake initial collection (all sources)
-│   ├── siphon.py          ← Incremental refresh (run by systemd timer)
-│   ├── requirements.txt
-│   └── data/scraped/      ← 4 JSON files with real Montgomery data
-├── mcp-server/
-│   ├── server.py          ← 9 MCP tools for Claude Desktop
-│   ├── decidim_client.py  ← GraphQL client (public reads)
+│   ├── lake.py            ← ArcGIS + Census + Bright Data pipeline
+│   ├── siphon.py          ← Incremental refresh (systemd timer)
+│   ├── seed.py            ← Proposal seeder (Grok-4)
 │   └── requirements.txt
-└── systemd/
-    ├── momentum-lake.service  ← systemd service for siphon
-    └── momentum-lake.timer    ← daily schedule
+├── docs/
+│   ├── architecture.md
+│   ├── data_lake.md
+│   └── bugs.md
+└── systemd/               ← systemd services for automated data refresh
 ```
 
 ---
 
 ## Hackathon Timeline
 
-| Day | Date | Focus | Status |
-|---|---|---|---|
-| 1 | Mar 5 | Decidim install + config + DB + Cloudflare | ✅ Done |
-| 2 | Mar 6 | Bright Data scraper + seeder + 60 proposals | ✅ Done |
-| 3 | Mar 7 | MCP Server — all 6 tools + end-to-end test | 🔄 In Progress |
-| 4 | Mar 8 | Admin bridge polish + branding + Pol.is | ⏳ |
-| 5 | Mar 9 | Final seed refresh + demo + submission | ⏳ |
+| Day | Date | Milestone |
+|---|---|---|
+| 1 | Mar 5 | Decidim live at mgm.styxcore.dev |
+| 2 | Mar 6 | Data lake: Census + ArcGIS (12 sources, 44,608 records) + Zillow + Yelp |
+| 3 | Mar 7 | MCP server 12 tools complete |
+| 4 | Mar 8 | End-to-end demo |
+| 5 | Mar 9 | Submission |
 
 ---
 
 ## Team
 
-| Name | Role |
-|---|---|
-| Alexandre Breton (StyxKnight) | Lead — Architecture, AI, MCP |
+Alexandre Breton (StyxKnight) — Architecture, AI, MCP
 
----
-
-*Last updated: 2026-03-05*
+*Last updated: 2026-03-07*

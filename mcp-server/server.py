@@ -13,6 +13,16 @@ from decidim_client import graphql
 import psycopg2
 import psycopg2.extras
 from google import genai as google_genai
+from jinja2 import Environment, FileSystemLoader
+
+_jinja = Environment(
+    loader=FileSystemLoader(Path(__file__).parent / "prompts"),
+    trim_blocks=True,
+    lstrip_blocks=True,
+)
+
+def _render(template_name: str, **kwargs) -> str:
+    return _jinja.get_template(template_name).render(**kwargs)
 
 load_dotenv()
 
@@ -725,6 +735,294 @@ Provide actionable solutions in JSON:
         response_format={"type": "json_object"},
     )
     return r.choices[0].message.content
+
+
+# ── TOOL 13 — analyze_neighborhood ──────────────────────────────────────────────
+@mcp.tool()
+def analyze_neighborhood(neighborhood: str, index: str = "all") -> str:
+    """
+    ANALYZE tool — computes ADI, SVI, and/or EJI composite deprivation scores.
+    Uses real Montgomery data (Census ACS + ArcGIS) against all 71 census tracts as baseline.
+
+    ADI (Area Deprivation Index) — UW Madison / HRSA: material deprivation
+    SVI (Social Vulnerability Index) — CDC/ATSDR: vulnerability to shocks (no race variable)
+    EJI (Environmental Justice Index) — CDC/ATSDR + EPA: cumulative environmental burden
+
+    index: 'ADI', 'SVI', 'EJI', or 'all'
+    Score 0.0–1.0: higher = more deprived/vulnerable/burdened.
+    Percentile: proportion of Montgomery neighborhoods scoring lower than this one.
+
+    neighborhood='list' returns the top 5 most vulnerable neighborhoods for each index.
+    See docs/analysis_methodology.md for full scientific basis and citations.
+    """
+    import statistics
+
+    VALID_INDICES = ["ADI", "SVI", "EJI", "all"]
+    if index not in VALID_INDICES:
+        return json.dumps({"error": f"Unknown index '{index}'. Use: ADI, SVI, EJI, or all"})
+
+    conn = get_db()
+
+    def _census_by_nb(cur, metric):
+        cur.execute("""
+            SELECT neighborhood, AVG(value) as val
+            FROM civic_data.census
+            WHERE metric = %s AND year >= 2020 AND value > 0
+              AND neighborhood IS NOT NULL AND neighborhood != ''
+            GROUP BY neighborhood
+        """, (metric,))
+        return {r[0]: float(r[1]) for r in cur.fetchall()}
+
+    def _city_by_nb(cur, source):
+        cur.execute("""
+            SELECT neighborhood, COUNT(*) as cnt
+            FROM civic_data.city_data
+            WHERE source = %s
+              AND neighborhood IS NOT NULL AND neighborhood != ''
+            GROUP BY neighborhood
+        """, (source,))
+        return {r[0]: float(r[1]) for r in cur.fetchall()}
+
+    def _compute(variables, target_nb):
+        """
+        variables: list of (name, {nb: value}, invert, weight)
+        Returns composite percentile score + factor breakdown for target_nb.
+        """
+        # Compute per-variable stats across all neighborhoods
+        var_stats = {}
+        for name, data, invert, weight in variables:
+            vals = list(data.values())
+            if len(vals) < 2:
+                continue
+            mean = sum(vals) / len(vals)
+            std = statistics.stdev(vals)
+            var_stats[name] = (mean, std, invert, weight)
+
+        def _composite_z(nb):
+            zs, ws = [], []
+            for name, data, invert, weight in variables:
+                if name not in var_stats or nb not in data:
+                    continue
+                mean, std, inv, w = var_stats[name]
+                if std == 0:
+                    continue
+                z = (data[nb] - mean) / std
+                if inv:
+                    z = -z
+                zs.append(z * w)
+                ws.append(w)
+            if not zs:
+                return None
+            return sum(zs) / sum(ws)
+
+        target_z = _composite_z(target_nb)
+        if target_z is None:
+            return {"error": f"No data found for '{target_nb}'. Try neighborhood='list' to see available names."}
+
+        # Percentile rank across all neighborhoods
+        all_nbs = set()
+        for _, data, _, _ in variables:
+            all_nbs.update(data.keys())
+        all_composites = [_composite_z(nb) for nb in all_nbs]
+        all_composites = [z for z in all_composites if z is not None]
+        rank = sum(1 for z in all_composites if z <= target_z)
+        percentile = round(rank / len(all_composites), 3) if all_composites else 0.5
+
+        # Top 3 factors
+        factors = []
+        for name, data, invert, weight in variables:
+            if name not in var_stats or target_nb not in data:
+                continue
+            mean, std, inv, w = var_stats[name]
+            if std == 0:
+                continue
+            raw = data[target_nb]
+            z = (raw - mean) / std
+            if inv:
+                z = -z
+            all_z = [(-((data[nb2] - mean) / std) if inv else ((data[nb2] - mean) / std))
+                     for nb2 in data]
+            pct_var = round(sum(1 for z2 in all_z if z2 <= z) / max(1, len(all_z)), 3)
+            factors.append({"variable": name, "raw_value": round(raw, 1), "z_score": round(z, 2), "percentile": pct_var})
+
+        top3 = sorted(factors, key=lambda f: abs(f["z_score"]), reverse=True)[:3]
+        used = len(factors)
+
+        return {
+            "score": percentile,
+            "interpretation": f"{round(percentile * 100)}% of Montgomery neighborhoods score lower on this index",
+            "variables_used": used,
+            "variables_expected": len(variables),
+            "low_confidence": used < 4,
+            "top_factors": top3,
+        }
+
+    with conn.cursor() as cur:
+        # Load all data once
+        poverty    = _census_by_nb(cur, "poverty_below")
+        income     = _census_by_nb(cur, "median_income")
+        unemployed = _census_by_nb(cur, "unemployed")
+        vacant     = _census_by_nb(cur, "housing_vacant")
+        rent       = _census_by_nb(cur, "median_rent")
+        housing_c  = _city_by_nb(cur, "housing_condition")
+        code_viol  = _city_by_nb(cur, "code_violations")
+        env_nuis   = _city_by_nb(cur, "environmental_nuisance")
+        food_saf   = _city_by_nb(cur, "food_safety")
+        fire       = _city_by_nb(cur, "fire_incidents")
+        transit    = _city_by_nb(cur, "transit_stops")
+        behavioral = _city_by_nb(cur, "behavioral_centers")
+
+        # 'list' mode: rank all neighborhoods by each index
+        if neighborhood == "list":
+            all_nbs = set(poverty) | set(income) | set(unemployed)
+            ranking = {}
+            for nb in sorted(all_nbs):
+                adi_vars = [
+                    ("poverty_below", poverty, False, 1.0), ("median_income", income, True, 1.0),
+                    ("unemployed", unemployed, False, 1.0), ("housing_vacant", vacant, False, 1.0),
+                    ("housing_condition", housing_c, False, 1.0), ("code_violations", code_viol, False, 1.0),
+                ]
+                r = _compute(adi_vars, nb)
+                ranking[nb] = r.get("score", 0)
+            top5 = sorted(ranking.items(), key=lambda x: x[1], reverse=True)[:5]
+            conn.close()
+            return json.dumps({
+                "top_5_most_deprived_ADI": [{"neighborhood": nb, "score": s} for nb, s in top5],
+                "note": "Run analyze_neighborhood(neighborhood='<name>', index='all') for full analysis"
+            }, indent=2)
+
+        indices_to_run = ["ADI", "SVI", "EJI"] if index == "all" else [index]
+        result = {
+            "neighborhood": neighborhood,
+            "methodology": "docs/analysis_methodology.md",
+            "scores": {},
+        }
+
+        if "ADI" in indices_to_run:
+            result["scores"]["ADI"] = {
+                "name": "Area Deprivation Index",
+                "source": "UW Madison / HRSA — material deprivation (income, employment, housing)",
+                **_compute([
+                    ("poverty_below",     poverty,    False, 1.0),
+                    ("median_income",     income,     True,  1.0),
+                    ("unemployed",        unemployed, False, 1.0),
+                    ("housing_vacant",    vacant,     False, 1.0),
+                    ("median_rent",       rent,       True,  0.5),
+                    ("housing_condition", housing_c,  False, 1.0),
+                    ("code_violations",   code_viol,  False, 1.0),
+                ], neighborhood),
+            }
+
+        if "SVI" in indices_to_run:
+            result["scores"]["SVI"] = {
+                "name": "Social Vulnerability Index",
+                "source": "CDC/ATSDR — vulnerability to shocks (Themes 1,2,4 — racial/ethnic theme excluded, see methodology)",
+                **_compute([
+                    ("poverty_below",      poverty,    False, 1.0),
+                    ("median_income",      income,     True,  1.0),
+                    ("unemployed",         unemployed, False, 1.0),
+                    ("housing_vacant",     vacant,     False, 1.0),
+                    ("median_rent",        rent,       False, 1.0),
+                    ("housing_condition",  housing_c,  False, 1.0),
+                    ("behavioral_centers", behavioral, True,  0.5),
+                    ("food_safety",        food_saf,   False, 0.5),
+                ], neighborhood),
+            }
+
+        if "EJI" in indices_to_run:
+            result["scores"]["EJI"] = {
+                "name": "Environmental Justice Index",
+                "source": "CDC/ATSDR + EPA — cumulative environmental burden on health",
+                **_compute([
+                    ("environmental_nuisance", env_nuis,  False, 1.5),
+                    ("code_violations",        code_viol, False, 1.0),
+                    ("housing_condition",      housing_c, False, 1.0),
+                    ("food_safety",            food_saf,  False, 1.0),
+                    ("fire_incidents",         fire,      False, 1.0),
+                    ("poverty_below",          poverty,   False, 1.0),
+                    ("unemployed",             unemployed,False, 1.0),
+                    ("median_income",          income,    True,  1.0),
+                    ("housing_vacant",         vacant,    False, 0.5),
+                    ("transit_stops",          transit,   True,  0.5),
+                ], neighborhood),
+            }
+
+    conn.close()
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+# ── TOOL 14 — civic_report ──────────────────────────────────────────────────────
+@mcp.tool()
+async def civic_report(neighborhood: str) -> str:
+    """
+    ANALYZE tool — full civic intelligence report for a Montgomery neighborhood.
+    Aggregates all research tools (Census trend, ArcGIS incidents, Yelp health, ADI/SVI/EJI scores),
+    then calls Grok-4 with structured prompt (Role + Lorebook + RAG + CoT + Restrictions + JSON schema)
+    to produce a factual, hallucination-resistant civic analysis.
+
+    Temperature: 0.1 (data analysis mode)
+    Output: structured JSON with findings, severity, trends, and top civic concerns.
+    All numbers in the output are verified against real data — no inference allowed.
+
+    Use this before find_solutions() to ground solution recommendations in confirmed facts.
+    """
+    # ── Step 1: Collect all research data ───────────────────────────────────────
+    census   = json.loads(get_census_trend(neighborhood))
+    incidents_list = []
+    for source in ["code_violations", "building_permits", "fire_incidents",
+                   "housing_condition", "food_safety", "environmental_nuisance"]:
+        inc = json.loads(get_city_incidents(source, neighborhood))
+        if inc.get("total", 0) > 0:
+            incidents_list.append(inc)
+
+    business = json.loads(get_business_health(neighborhood))
+    scores   = json.loads(analyze_neighborhood(neighborhood, "all"))
+
+    # ── Step 2: Build RAG data block ────────────────────────────────────────────
+    rag = {
+        "neighborhood": neighborhood,
+        "census_trend": census.get("metrics", {}),
+        "city_incidents": {i["source"]: i["total"] for i in incidents_list},
+        "business_health": {
+            "total": business.get("total", 0),
+            "closed": business.get("closed", 0),
+            "avg_rating": business.get("avg_rating"),
+        },
+        "deprivation_scores": {
+            idx: {
+                "score": s.get("score"),
+                "interpretation": s.get("interpretation"),
+                "top_factors": s.get("top_factors", []),
+            }
+            for idx, s in scores.get("scores", {}).items()
+            if "score" in s
+        },
+    }
+
+    # ── Step 3: Render prompt from Jinja2 template ──────────────────────────────
+    prompt = _render("civic_report.j2", neighborhood=neighborhood, data=rag)
+
+    # ── Step 4: Grok-4 at temperature=0.1 ───────────────────────────────────────
+    r = await openrouter.chat.completions.create(
+        model="x-ai/grok-4",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=700,
+        temperature=0.1,
+        response_format={"type": "json_object"},
+    )
+
+    raw = r.choices[0].message.content
+    try:
+        parsed = json.loads(raw)
+        parsed["_sources"] = {
+            "census_tracts": census.get("data_source", "Census ACS"),
+            "incidents_sources": [i["source"] for i in incidents_list],
+            "business_source": business.get("data_source", "Yelp"),
+            "methodology": "docs/analysis_methodology.md",
+        }
+        return json.dumps(parsed, ensure_ascii=False, indent=2)
+    except json.JSONDecodeError:
+        return raw
 
 
 if __name__ == "__main__":

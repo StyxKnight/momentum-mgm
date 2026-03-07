@@ -437,3 +437,34 @@ Recorded during Day 2 full doc audit. These are intentional deviations from orig
   headers={"Content-Type": "application/json", "Host": "mgm.styxcore.dev", ...}
   ```
 - **Lesson:** Pour toute intégration Python → Decidim local, le Host header est mandatory. Documenter dans `decidim_client.py` aussi.
+
+---
+
+### [DECISION-003] Seuils de sévérité civique — quartiles ADI/SVI + LISC commercial distress
+- **Date:** 2026-03-07
+- **Contexte:** Le tool `civic_report` assigne une sévérité globale (critical/high/moderate/low) à chaque quartier selon ses scores ADI, SVI, EJI.
+- **Décision:** Utiliser les quartiles comme seuils — standard officiel des indices ADI (UW Neighborhood Atlas) et SVI (CDC/ATSDR). Rejeter les seuils arbitraires au profit de:
+
+| Sévérité | Score | Signification |
+|---|---|---|
+| critical | > 0.75 | Top quartile — pire que 75% des quartiers de Montgomery |
+| high | 0.50 – 0.75 | Au-dessus de la médiane |
+| moderate | 0.25 – 0.50 | Entre 1er et 2e quartile |
+| low | < 0.25 | Quartile inférieur |
+
+- **Seuil business closure:** > 15% = détresse commerciale. Source: LISC (Local Initiatives Support Corporation), standard pour l'évaluation des corridors commerciaux urbains.
+- **Rationale:** Tout seuil arbitraire non ancré dans la littérature officielle crée un risque de contestation. Les quartiles sont défendables parce qu'ils sont relatifs à Montgomery elle-même — un quartier "critical" l'est par rapport aux 71 autres tracts de la ville.
+- **Sources:** UW Neighborhood Atlas ADI documentation; CDC/ATSDR SVI 2022 Technical Documentation; LISC Commercial Corridor Distress Framework.
+
+### [DECISION-004] Découplage prompts / code — templates Jinja2
+- **Date:** 2026-03-07
+- **Contexte:** Les prompts LLM dans server.py étaient hardcodés comme f-strings Python, mélangés avec la logique de tool.
+- **Décision:** Tout prompt de plus de 3 lignes vit dans `mcp-server/prompts/` comme fichier `.j2` (Jinja2). Le server.py charge et rend les templates via `jinja2.Environment(FileSystemLoader(...))`.
+- **Structure:**
+  ```
+  mcp-server/prompts/
+    base.j2           ← lorebook commun + restrictions universelles
+    civic_report.j2   ← analyse civique (extends base.j2)
+  ```
+- **Rationale:** Les prompts évoluent indépendamment du code Python. Un changement de prompt ne nécessite pas de toucher à la logique du tool. Versionnage séparé, itération rapide, lisibilité. Pattern utilisé en production par LangChain, Semantic Kernel (Microsoft), et PromptLayer.
+- **Dépendance ajoutée:** `jinja2>=3.1.0` dans `mcp-server/requirements.txt`.
