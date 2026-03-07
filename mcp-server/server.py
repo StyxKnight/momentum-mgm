@@ -13,6 +13,7 @@ from decidim_client import graphql
 import psycopg2
 import psycopg2.extras
 from google import genai as google_genai
+from google.genai import types as genai_types
 from jinja2 import Environment, FileSystemLoader
 
 _jinja = Environment(
@@ -23,6 +24,33 @@ _jinja = Environment(
 
 def _render(template_name: str, **kwargs) -> str:
     return _jinja.get_template(template_name).render(**kwargs)
+
+
+async def _generate_json(prompt: str, temperature: float = 0.1) -> str:
+    """Gemini 2.5 Flash primary (direct API), Grok-4 via OpenRouter fallback."""
+    import asyncio
+    if _gemini:
+        try:
+            def _call():
+                return _gemini.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=prompt,
+                    config=genai_types.GenerateContentConfig(
+                        temperature=temperature,
+                        response_mime_type="application/json",
+                    ),
+                )
+            r = await asyncio.get_event_loop().run_in_executor(None, _call)
+            return r.text
+        except Exception:
+            pass  # fallback to Grok
+    r = await openrouter.chat.completions.create(
+        model="x-ai/grok-4",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=temperature,
+        response_format={"type": "json_object"},
+    )
+    return r.choices[0].message.content
 
 load_dotenv()
 
@@ -728,13 +756,7 @@ Provide actionable solutions in JSON:
   "estimated_timeline": "X months/years to see impact"
 }}"""
 
-    r = await openrouter.chat.completions.create(
-        model="x-ai/grok-4",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=800,
-        response_format={"type": "json_object"},
-    )
-    return r.choices[0].message.content
+    return await _generate_json(prompt, temperature=0.4)
 
 
 # ── TOOL 13 — analyze_neighborhood ──────────────────────────────────────────────
@@ -1002,16 +1024,8 @@ async def civic_report(neighborhood: str) -> str:
     # ── Step 3: Render prompt from Jinja2 template ──────────────────────────────
     prompt = _render("civic_report.j2", neighborhood=neighborhood, data=rag)
 
-    # ── Step 4: Grok-4 at temperature=0.1 ───────────────────────────────────────
-    r = await openrouter.chat.completions.create(
-        model="x-ai/grok-4",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=700,
-        temperature=0.1,
-        response_format={"type": "json_object"},
-    )
-
-    raw = r.choices[0].message.content
+    # ── Step 4: Gemini 2.5 Flash (fallback Grok-4) at temperature=0.1 ───────────
+    raw = await _generate_json(prompt, temperature=0.1)
     try:
         parsed = json.loads(raw)
         parsed["_sources"] = {
