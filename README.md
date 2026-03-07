@@ -31,26 +31,24 @@ LAYER 1 — CITIZEN PLATFORM (Decidim 0.31.2, live at mgm.styxcore.dev)
 
 LAYER 2 — CIVIC DATA LAKE (real Montgomery open data, PostgreSQL + pgvector)
 
-  civic_data.city_data — Montgomery ArcGIS Open Data (44,608 records total):
-    fire_incidents          20,000
-    code_violations         10,000
-    building_permits         5,619
-    housing_condition        5,561
-    transit_stops            1,613
-    food_safety              1,337
-    environmental_nuisance     330
-    education_facilities        97
-    citizen_reports             16
-    behavioral_centers          13
-    opportunity_zones           12
-    infrastructure_projects     10
+  civic_data.city_data — Montgomery ArcGIS Open Data (~60,600 records, 19 sources):
+    fire_incidents          ~20,000     business_licenses (2022+)  12,751
+    code_violations         ~10,000     zoning_decisions            2,005
+    building_permits          5,619     city_owned_property           681
+    housing_condition         5,561     historic_markers              319
+    transit_stops             1,613     parks_recreation               97
+    food_safety               1,337     community_centers              24
+    environmental_nuisance      330     education_facility            114
+    education_facilities         97     citizen_reports                16
+    behavioral_centers           13     opportunity_zones              12
+    infrastructure_projects      10
 
   civic_data.census       — Census ACS 5-year estimates: 11,334 rows, 2012–2024, 71 tracts
   civic_data.businesses   — Yelp via Bright Data: 500 businesses
   civic_data.properties   — Zillow: 500 properties
-  civic_data.embeddings   — pgvector (gemini-embedding-001, 3072d): 1,000 embeddings
+  civic_data.embeddings   — pgvector (gemini-embedding-001, 3072d): ~61,000 embeddings
 
-LAYER 3 — MCP SERVER (12 tools, Python FastMCP, stdio transport)
+LAYER 3 — MCP SERVER (15 tools, Python FastMCP, stdio transport)
   Connects Claude Desktop directly to Decidim + the data lake.
   City administrators query their city in plain language.
 ```
@@ -61,7 +59,7 @@ LAYER 3 — MCP SERVER (12 tools, Python FastMCP, stdio transport)
 
 ```
 DETECT     get_census_trend()         14 years of Census ACS OLS regression per neighborhood
-           get_city_incidents()       12 ArcGIS sources, neighborhood-filtered, status breakdown
+           get_city_incidents()       19 ArcGIS sources, neighborhood-filtered, status breakdown
 
 UNDERSTAND get_neighborhood_intelligence()  Census + Zillow + Yelp aggregated report
            semantic_civic_search()         pgvector cosine similarity across all civic data
@@ -72,6 +70,7 @@ FIND       find_solutions()           Federal programs (HUD, CDBG, EPA, DOT) + c
 
 ACT        recommend_action()         Concrete step + department + 311 service type
            classify_proposal()        AI classification into 10 civic categories
+           post_ai_response()         Full civic loop: proposal → analysis → AI comment posted back to Decidim
 ```
 
 **Example query from city hall:**
@@ -94,9 +93,12 @@ Claude calls `get_census_trend()` → 14 years of income, poverty, vacancy, unem
 | `get_neighborhood_intelligence` | Census + Zillow + Yelp multi-source aggregated report |
 | `semantic_civic_search` | pgvector cosine similarity search across all civic data |
 | `get_census_trend` | 14yr OLS regression per metric, projection to 2026, R² confidence |
-| `get_city_incidents` | 12 ArcGIS sources: counts, status breakdown, date range |
+| `get_city_incidents` | 19 ArcGIS sources: counts, status breakdown, date range |
 | `get_business_health` | Yelp closure rate, avg rating, top categories by neighborhood |
+| `analyze_neighborhood` | ADI + SVI + EJI composite deprivation scores, Z-score vs 71 Montgomery tracts |
+| `civic_report` | Full AI neighborhood report — RAG + Gemini 2.5 Flash + CoT, JSON schema enforced |
 | `find_solutions` | Federal programs + comparable cities + Montgomery-specific recommendations |
+| `post_ai_response` | Closed civic loop: fetches proposal → AI analysis → posts comment back to Decidim |
 
 ---
 
@@ -114,8 +116,8 @@ Brazil is building toward this. We shipped it.
 |---|---|
 | Civic Platform | Decidim 0.31.2 (Ruby on Rails, native ARM64) |
 | Database | PostgreSQL 15 + pgvector |
-| AI — Classification | Gemini Flash via OpenRouter |
-| AI — Solutions | Grok-4 via OpenRouter |
+| AI — Primary | Gemini 2.5 Flash (Google GenAI direct API) |
+| AI — Fallback | Grok-4 via OpenRouter |
 | AI — Embeddings | gemini-embedding-001 (3072d, Matryoshka, Google GenAI) |
 | Data — City | Montgomery ArcGIS Open Data (no auth, REST pipeline) |
 | Data — Census | US Census ACS API (free, 2012–2024) |
@@ -155,7 +157,7 @@ momentum-mgm/
 |---|---|---|
 | 1 | Mar 5 | Decidim live at mgm.styxcore.dev |
 | 2 | Mar 6 | Data lake: Census + ArcGIS (12 sources, 44,608 records) + Zillow + Yelp |
-| 3 | Mar 7 | MCP server 12 tools complete |
+| 3 | Mar 7 | MCP server 15 tools, data lake 44K→60K records, civic loop closed |
 | 4 | Mar 8 | End-to-end demo |
 | 5 | Mar 9 | Submission |
 
@@ -165,4 +167,4 @@ momentum-mgm/
 
 Alexandre Breton (StyxKnight) — Architecture, AI, MCP
 
-*Last updated: 2026-03-07*
+*Last updated: 2026-03-07 (Day 3)*
