@@ -399,3 +399,41 @@ Recorded during Day 2 full doc audit. These are intentional deviations from orig
 - **Lesson:** Pour les villes secondaires US, le zip code est le meilleur proxy de quartier disponible quand OSM/Google n'ont pas de polygones.
 
 *Last updated: 2026-03-06*
+
+### [BUG-032] Decidim GraphQL `add_comment` — `hidden?` called on Hash instead of Comment
+- **Date:** 2026-03-06
+- **Severity:** Critical
+- **Status:** Fixed
+- **Symptom:** `undefined method 'hidden?' for an instance of Hash` — la mutation `addComment` retourne une erreur 500. Le commentaire n'est PAS créé en DB.
+- **Root Cause:** Quand le `Decidim::Api::ApiUser` n'est pas admin, la validation `commentable_can_have_comments` dans `CommentForm` peut échouer (retourne `:invalid`). Quand `:invalid` est broadcasté, le bloc `on(:ok)` n'est jamais exécuté → aucun `return comment` non-local → la méthode `add_comment` retourne la dernière expression évaluée = `event_recorder.events` (un Hash Wisper). GraphQL tente ensuite d'appliquer `CommentType.authorized?(hash, context)` → `hash.hidden?` → NoMethodError. L'erreur est catchée par le QueriesController avant le commit → rollback → 0 comment en DB.
+- **Fix:** Donner le flag `admin: true` au `Decidim::Api::ApiUser` `momentum_ai`. Avec admin, `user_has_any_role?` retourne true → la validation `commentable_can_have_comments` est skippée → form valide → `on(:ok)` reçoit le vrai AR Comment → `authorized?` fonctionne correctement.
+- **Fix appliqué:**
+  ```ruby
+  u = Decidim::Api::ApiUser.find_by(nickname: "momentum_ai")
+  u.admin = true
+  u.save!(validate: false)
+  ```
+- **Lesson:** Tout `Decidim::Api::ApiUser` qui doit écrire des commentaires doit avoir `admin: true`. Ne jamais créer un ApiUser de write sans ce flag. La vraie cause root est un bug Decidim : `add_comment` ne gère pas le cas `:invalid` et laisse la méthode retourner implicitement la valeur de retour de `CreateComment.call` (un Hash Wisper), au lieu de retourner nil explicitement.
+
+### [BUG-033] Decidim API JWT — `DECIDIM_API_JWT_SECRET` non chargé par le service systemd
+- **Date:** 2026-03-06
+- **Severity:** Critical
+- **Status:** Fixed
+- **Symptom:** `POST /api/sign_in` retourne `{"jwt_token": null}` même avec credentials corrects.
+- **Root Cause:** La gem `decidim-api` lit `DECIDIM_API_JWT_SECRET` via `Decidim::Env.new("DECIDIM_API_JWT_SECRET").value`. Le service systemd (`/etc/systemd/system/decidim.service`) ne chargeait pas le fichier `.env` de l'app — seulement `HOME` et `RAILS_ENV` étaient définis. Dotenv-rails n'est pas dans le Gemfile de `momentum-app`. Sans ce secret, le middleware Warden JWT ne dispatch pas de tokens.
+- **Fix:** Ajouter `EnvironmentFile=/home/styxknight/momentum-app/.env` dans `[Service]` du service systemd, puis `sudo systemctl daemon-reload && sudo systemctl restart decidim`.
+- **Variables à garder dans `/home/styxknight/momentum-app/.env`:** `DECIDIM_API_JWT_SECRET`, `DECIDIM_API_KEY`, `DECIDIM_API_SECRET` (gitignored ✅).
+- **Lesson:** Vérifier que le service systemd charge bien les variables d'environnement nécessaires. Pour tout nouveau secret: ajouter dans `.env` ET vérifier que `EnvironmentFile` est dans le service.
+
+### [BUG-034] Decidim GraphQL API — Host header obligatoire pour toutes les requêtes
+- **Date:** 2026-03-06
+- **Severity:** High
+- **Status:** Fixed (workaround permanent)
+- **Symptom:** `POST http://localhost:3000/api` retourne 302 redirect vers `/system/` au lieu de la réponse GraphQL.
+- **Root Cause:** Le middleware `Decidim::Middleware::CurrentOrganization` utilise le `request.host` pour trouver l'organisation en DB. Quand on appelle `localhost`, aucune org ne correspond (`mgm.styxcore.dev` est le host enregistré) → redirect vers `/system/`.
+- **Fix:** Toujours envoyer `Host: mgm.styxcore.dev` dans les headers HTTP, même quand on appelle localhost:3000 directement.
+- **Pattern dans enrich_decidim.py:**
+  ```python
+  headers={"Content-Type": "application/json", "Host": "mgm.styxcore.dev", ...}
+  ```
+- **Lesson:** Pour toute intégration Python → Decidim local, le Host header est mandatory. Documenter dans `decidim_client.py` aussi.

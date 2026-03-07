@@ -478,28 +478,36 @@ def semantic_civic_search(query: str, neighborhood: str = None) -> str:
     return json.dumps({"query": query, "results": results}, ensure_ascii=False, indent=2)
 
 
-# ── TOOL 9 ─────────────────────────────────────────────────────────────────────
+# ── TOOL 9 — get_census_trend ───────────────────────────────────────────────────
 @mcp.tool()
-def get_neighborhood_velocity(neighborhood: str = None) -> str:
+def get_census_trend(neighborhood: str = None) -> str:
     """
-    Linear regression on Census ACS 2012-2024 time series to measure neighborhood velocity.
-    Returns rate of change per year and 2-year projection (2026) for key metrics.
-    High negative velocity on income + high vacancy = urgency signal for intervention.
-    neighborhood=None returns city-wide aggregate.
+    RESEARCH tool — no AI, no analysis, no thresholds.
+    Returns raw Census ACS 2012-2024 linear regression (OLS) for a Montgomery neighborhood.
+    Metrics: median_income, poverty_below, housing_vacant, unemployed, median_rent.
+    Each metric returns: current value, slope per year, projection to 2026, R² confidence.
+    Metrics with R² < 0.5 are flagged low_confidence — Claude should not draw conclusions from them.
+    neighborhood=None returns city-wide aggregate across all 71 tracts.
     """
     conn = get_db()
+    nb = neighborhood
     metrics = ["median_income", "poverty_below", "housing_vacant", "unemployed", "median_rent"]
-    result = {"neighborhood": neighborhood or "Montgomery (city-wide)", "velocity": {}}
+    result = {
+        "neighborhood": nb or "Montgomery (city-wide)",
+        "data_source": "Census ACS 5-year estimates, 2012-2024, Montgomery County AL",
+        "metrics": {},
+    }
 
     with conn.cursor() as cur:
         for metric in metrics:
             cur.execute("""
                 SELECT year, AVG(value) as value
                 FROM civic_data.census
-                WHERE metric = %s AND (%s IS NULL OR neighborhood ILIKE %s)
+                WHERE metric = %s
+                  AND (%s IS NULL OR neighborhood ILIKE %s)
                   AND value > 0
                 GROUP BY year ORDER BY year
-            """, (metric, neighborhood, f"%{neighborhood}%" if neighborhood else None))
+            """, (metric, nb, f"%{nb}%" if nb else None))
             rows = cur.fetchall()
             if len(rows) < 3:
                 continue
@@ -507,36 +515,165 @@ def get_neighborhood_velocity(neighborhood: str = None) -> str:
             xs = [r[0] for r in rows]
             ys = [r[1] for r in rows]
             slope, intercept, r2 = _linreg(xs, ys)
-            current = ys[-1]
-            projection_2026 = slope * 2026 + intercept
 
-            result["velocity"][metric] = {
-                "current": round(current, 1),
-                "slope_per_year": round(slope, 1),
-                "direction": "improving" if slope > 0 else "declining",
-                "projection_2026": round(projection_2026, 1),
-                "confidence_r2": round(r2, 3),
+            result["metrics"][metric] = {
+                "current": round(ys[-1], 1),
+                "year_current": xs[-1],
+                "year_baseline": xs[0],
+                "baseline": round(ys[0], 1),
+                "slope_per_year": round(slope, 2),
+                "projection_2026": round(slope * 2026 + intercept, 1),
+                "r2": round(r2, 3),
+                "low_confidence": r2 < 0.5,
+                "data_points": len(xs),
             }
 
     conn.close()
-
-    # Urgency score: declining income + rising vacancy + rising unemployment
-    v = result["velocity"]
-    urgency_signals = []
-    if v.get("median_income", {}).get("slope_per_year", 1) < 0:
-        urgency_signals.append("income declining")
-    if v.get("housing_vacant", {}).get("slope_per_year", 0) > 0:
-        urgency_signals.append("vacancy rising")
-    if v.get("unemployed", {}).get("slope_per_year", 0) > 0:
-        urgency_signals.append("unemployment rising")
-
-    result["urgency"] = "high" if len(urgency_signals) >= 2 else "medium" if urgency_signals else "low"
-    result["urgency_signals"] = urgency_signals
-
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-# ── TOOL 10 ────────────────────────────────────────────────────────────────────
+# ── TOOL 10 — get_city_incidents ────────────────────────────────────────────────
+@mcp.tool()
+def get_city_incidents(source: str, neighborhood: str = None) -> str:
+    """
+    RESEARCH tool — no AI, no analysis, no thresholds.
+    Returns raw counts from Montgomery ArcGIS open data for one source at a time.
+    source must be one of: code_violations, building_permits, fire_incidents,
+    housing_condition, food_safety, environmental_nuisance, transit_stops,
+    education_facilities, behavioral_centers, infrastructure_projects,
+    citizen_reports, opportunity_zones.
+    Use source='list' to get available sources and their total counts.
+    neighborhood=None returns city-wide totals.
+    """
+    VALID_SOURCES = [
+        "code_violations", "building_permits", "fire_incidents", "housing_condition",
+        "food_safety", "environmental_nuisance", "transit_stops", "education_facilities",
+        "behavioral_centers", "infrastructure_projects", "citizen_reports", "opportunity_zones",
+    ]
+    # Sources with meaningful status breakdowns
+    STATUS_SOURCES = {"code_violations", "building_permits", "infrastructure_projects"}
+
+    conn = get_db()
+
+    if source == "list":
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT source, COUNT(*) as total
+                FROM civic_data.city_data
+                WHERE (%s IS NULL OR neighborhood ILIKE %s)
+                GROUP BY source ORDER BY total DESC
+            """, (neighborhood, f"%{neighborhood}%" if neighborhood else None))
+            rows = cur.fetchall()
+        conn.close()
+        return json.dumps({
+            "neighborhood": neighborhood or "Montgomery (city-wide)",
+            "available_sources": {r[0]: r[1] for r in rows},
+        }, ensure_ascii=False, indent=2)
+
+    if source not in VALID_SOURCES:
+        conn.close()
+        return json.dumps({"error": f"Unknown source '{source}'. Use source='list' to see valid options."})
+
+    nb = neighborhood
+    result = {
+        "neighborhood": nb or "Montgomery (city-wide)",
+        "source": source,
+        "data_source": "Montgomery ArcGIS Open Data (services7.arcgis.com)",
+    }
+
+    with conn.cursor() as cur:
+        # Total count
+        cur.execute("""
+            SELECT COUNT(*) FROM civic_data.city_data
+            WHERE source = %s AND (%s IS NULL OR neighborhood ILIKE %s)
+        """, (source, nb, f"%{nb}%" if nb else None))
+        result["total"] = cur.fetchone()[0]
+
+        # Status breakdown — only for sources with meaningful status values
+        if source in STATUS_SOURCES:
+            cur.execute("""
+                SELECT status, COUNT(*) as cnt
+                FROM civic_data.city_data
+                WHERE source = %s AND (%s IS NULL OR neighborhood ILIKE %s)
+                  AND status IS NOT NULL AND status != '' AND status != 'None'
+                GROUP BY status ORDER BY cnt DESC
+            """, (source, nb, f"%{nb}%" if nb else None))
+            rows = cur.fetchall()
+            if rows:
+                result["by_status"] = {r[0]: r[1] for r in rows}
+
+        # Date range — only for sources that have reported_at
+        cur.execute("""
+            SELECT MIN(reported_at), MAX(reported_at)
+            FROM civic_data.city_data
+            WHERE source = %s AND (%s IS NULL OR neighborhood ILIKE %s)
+              AND reported_at IS NOT NULL
+        """, (source, nb, f"%{nb}%" if nb else None))
+        dates = cur.fetchone()
+        if dates and dates[0]:
+            result["date_range"] = {
+                "earliest": dates[0].strftime("%Y-%m-%d"),
+                "latest": dates[1].strftime("%Y-%m-%d"),
+            }
+
+    conn.close()
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+# ── TOOL 11 — get_business_health ───────────────────────────────────────────────
+@mcp.tool()
+def get_business_health(neighborhood: str = None) -> str:
+    """
+    RESEARCH tool — no AI, no analysis, no thresholds.
+    Returns raw Yelp business data for a Montgomery neighborhood.
+    Includes: total count, closed count, average rating, average review count
+    (proxy for foot traffic), and top 5 categories by business count.
+    neighborhood=None returns city-wide totals.
+    """
+    conn = get_db()
+    nb = neighborhood
+    result = {
+        "neighborhood": nb or "Montgomery (city-wide)",
+        "data_source": "Yelp via Bright Data (500 businesses sampled, Montgomery AL)",
+    }
+
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute("""
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN is_closed THEN 1 ELSE 0 END) as closed,
+                ROUND(AVG(rating)::numeric, 2) as avg_rating,
+                ROUND(AVG(review_count)::numeric, 0) as avg_reviews
+            FROM civic_data.businesses
+            WHERE (%s IS NULL OR neighborhood ILIKE %s)
+        """, (nb, f"%{nb}%" if nb else None))
+        row = cur.fetchone()
+
+        if not row or not row["total"]:
+            conn.close()
+            return json.dumps({"neighborhood": nb or "Montgomery (city-wide)", "total": 0})
+
+        result["total"] = row["total"]
+        result["closed"] = row["closed"] or 0
+        result["avg_rating"] = float(row["avg_rating"]) if row["avg_rating"] else None
+        result["avg_reviews"] = int(row["avg_reviews"]) if row["avg_reviews"] else None
+
+        cur.execute("""
+            SELECT category, COUNT(*) as cnt
+            FROM civic_data.businesses
+            WHERE (%s IS NULL OR neighborhood ILIKE %s)
+              AND category IS NOT NULL AND category != ''
+            GROUP BY category ORDER BY cnt DESC LIMIT 5
+        """, (nb, f"%{nb}%" if nb else None))
+        cats = cur.fetchall()
+        if cats:
+            result["top_categories"] = {r["category"]: r["cnt"] for r in cats}
+
+    conn.close()
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+# ── TOOL 12 ────────────────────────────────────────────────────────────────────
 @mcp.tool()
 async def find_solutions(problem: str, neighborhood: str = None) -> str:
     """
