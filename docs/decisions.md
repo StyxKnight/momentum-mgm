@@ -54,13 +54,40 @@ Running log of every significant technical or design decision: what was chosen, 
 
 ---
 
-### [DECISION-005] Hiérarchie modèles IA — Gemini primary, Grok-4 fallback ⏳ EN ATTENTE
+### [DECISION-005] Hiérarchie modèles IA — Gemini primary, Grok-4 fallback ✅ IMPLÉMENTÉ
 - **Date:** 2026-03-07
-- **Statut:** Noté, pas encore implémenté.
-- **Décision prévue:** Gemini Flash (Google) comme modèle primaire sur tous les tools IA. Grok-4 (OpenRouter) comme fallback si Gemini échoue.
-- **Rejeté (actuel):** Grok-4 primaire sur `civic_report` et `find_solutions`.
-- **Rationale:** Grok-4 via OpenRouter coûte ~$0.25/appel. Gemini Flash coûte ~$0.002/appel — 125x moins cher. Pour les tests et le développement, Gemini primaire évite de brûler le budget. Grok-4 reste disponible pour les cas où la qualité d'analyse est critique.
-- **Impact:** Modifier `civic_report` et `find_solutions` dans server.py pour tenter Gemini Flash d'abord, fallback Grok-4 sur exception.
+- **Statut:** Implémenté. `_generate_json()` = Gemini 2.5 Flash direct API, fallback Grok-4 via OpenRouter.
+- **Fix:** Tools 2 et 4 utilisaient `openrouter` directement — corrigé pour utiliser `_generate_json()`.
+- **Rejeté:** OpenRouter `google/gemini-flash-1.5` (détour inutile via proxy, pas le vrai Gemini 2.5 Flash).
+- **Rationale:** Gemini Flash direct ~$0.002/appel vs Grok-4 ~$0.25/appel. Fallback automatique si Gemini échoue.
+
+---
+
+### [DECISION-006] Decidim write — GraphQL mutations via JWT (machine-to-machine)
+- **Date:** 2026-03-07
+- **Décision:** Écriture Decidim via GraphQL mutations authentifiées (API user `momentum_ai`, id=147).
+- **Rejeté:** Rails runner subprocess depuis Python (fonctionnel mais lourd, pas une vraie API).
+- **Rejeté:** GraphQL sans auth (mutations non exposées sans token).
+- **Flow:** `POST /api/sign_in` → JWT token (2h) → `Authorization: Bearer` → mutation `commentable.addComment`.
+- **Credentials:** `DECIDIM_API_KEY` + `DECIDIM_API_SECRET` dans `.env`. Token caché dans `decidim_client.py`.
+- **Scope:** 3 mutations disponibles: `comment`, `commentable`, `component`. Seul `commentable.addComment` est utilisé.
+- **Note schema:** Avec auth JWT, `TranslatedField` utilise `translation(locale: "en")` et non `{ en }`. Queries read utilisent le schema sans auth (pas de Host header nécessaire, `title { en }` fonctionne).
+
+---
+
+### [DECISION-007] Data lake ArcGIS — 16 sources, 10/10 catégories couvertes
+- **Date:** 2026-03-07
+- **Décision:** Expansion du data lake de 12 à 16 sources ArcGIS. Toutes les catégories civiques ont une couverture minimale viable.
+- **Nouvelles sources ajoutées:**
+  - `parks_recreation` → parks_culture (97 records)
+  - `city_owned_property` → governance (681 records)
+  - `zoning_decisions` → governance (2,005 records)
+  - `business_licenses` (2022+) → economy (12,751 records)
+  - `historic_markers` → parks_culture (319 records)
+  - `community_centers` → parks_culture (24 records)
+  - `education_facility` → education (114 records)
+- **Total city_data:** ~60,600 records (vs 44,608 initial)
+- **Rejeté:** Collecter tous les 159K business_licenses — filtre 2022+ = données récentes pertinentes (~12K).
 
 ---
 

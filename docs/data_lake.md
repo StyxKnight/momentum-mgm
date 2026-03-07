@@ -79,11 +79,34 @@ All filtered to: **city = "Montgomery", state = "AL"** (or "Alabama")
 | % white alone | B02001_002E / B02001_001E | Demographics |
 | % Black/African American | B02001_003E / B02001_001E | Demographics |
 
-### City of Montgomery Open Data
+### City of Montgomery ArcGIS Open Data (16 sources)
 
-- **Portal:** https://opendata.montgomeryal.gov/
-- **What we use:** 311 service requests, crime statistics (scraped via Bright Data web_unlocker → JSON)
-- **Note:** Stored in existing `data/scraped/` JSON files, also loaded into `civic_data.city_data`
+- **Portal:** ArcGIS REST API — `services7.arcgis.com/xNUwUjOJqYE54USz/ArcGIS/rest/services/`
+- **Auth:** None required
+- **All stored in:** `civic_data.city_data` (source + category + neighborhood + address + lat/lon + status + raw_data)
+
+| Source | Category | Records |
+|---|---|---|
+| fire_incidents | public_safety | ~20,000 |
+| code_violations | housing | ~10,000 |
+| building_permits | housing | 5,619 |
+| housing_condition | housing | 5,561 |
+| transit_stops | transportation | 1,613 |
+| food_safety | health | 1,337 |
+| environmental_nuisance | environment | 330 |
+| education_facilities | education | 97 |
+| citizen_reports | governance | 16 |
+| behavioral_centers | health | 13 |
+| opportunity_zones | economy | 12 |
+| infrastructure_projects | infrastructure | 10 |
+| business_licenses (2022+) | economy | 12,751 |
+| historic_markers | parks_culture | 319 |
+| community_centers | parks_culture | 24 |
+| education_facility | education | 114 |
+| parks_recreation | parks_culture | 97 |
+| city_owned_property | governance | 681 |
+| zoning_decisions | governance | 2,005 |
+| **TOTAL** | | **~60,600** |
 
 ---
 
@@ -480,28 +503,26 @@ Embedding model: `gemini-embedding-001` via Google GenAI API (3072 dimensions, M
 
 ---
 
-*Last updated: 2026-03-06*
-
 ---
 
-## Data Lake Expansion Plan — Coverage Gaps by Civic Category
+## Category Coverage — État réel ✅ COMPLÉTÉ (2026-03-07)
 
-**Constat (2026-03-06):** Le data lake actuel couvre bien le Census ACS et partiellement Yelp/Zillow, mais n'a pas de couverture dédiée pour 7 des 10 catégories civiques. Chaque catégorie a besoin d'un **minimum viable de données réelles** pour que les MCP tools `get_neighborhood_intelligence` et `find_solutions` soient vraiment utiles.
+### Couverture actuelle — 10/10 catégories ✅
 
-### Couverture actuelle par catégorie
+| Catégorie | Sources | Records |
+|---|---|---|
+| housing | code_violations + building_permits + housing_condition + Census | ~21,000+ |
+| public_safety | fire_incidents | ~20,000 |
+| economy | business_licenses (2022+) + opportunity_zones + Census income | ~12,763 |
+| governance | citizen_reports + city_owned_property + zoning_decisions | ~2,702 |
+| transportation | transit_stops | 1,613 |
+| health | food_safety + behavioral_centers + Census | ~1,350 |
+| education | education_facilities + education_facility + Census | ~211 |
+| parks_culture | parks_recreation + historic_markers + community_centers | ~440 |
+| environment | environmental_nuisance | 330 |
+| infrastructure | infrastructure_projects + Census | ~10 |
 
-| Catégorie | Census ACS | Zillow | Yelp | Manque critique |
-|---|---|---|---|---|
-| Housing | ✅ poverty, rent, vacancy | ✅ 500 props (geocoding imprécis) | ⚠️ partiel | Permis de construire, évictions |
-| Economy | ✅ income, unemployment | ❌ | ✅ businesses | Indeed (0 rows), emplois par industrie |
-| Infrastructure | ✅ population trends | ❌ | ❌ | 311 requests, permis de travaux |
-| Health | ✅ poverty (proxy) | ❌ | ⚠️ (gyms, dentistes) | Cliniques, pharmacies géolocalisées |
-| Education | ✅ edu_bachelors_plus | ❌ | ❌ | Écoles, résultats scolaires |
-| Environment | ❌ | ❌ | ❌ | Qualité eau/air, zones inondables FEMA |
-| Transportation | ❌ | ❌ | ❌ | Arrêts MAX Bus, fréquence routes |
-| Public Safety | ❌ | ❌ | ❌ | Incidents crime par quartier |
-| Parks & Culture | ❌ | ❌ | ⚠️ (museums) | Parcs géolocalisés, équipements |
-| Governance | ❌ | ❌ | ❌ | Procès-verbaux conseil, votes |
+> **Statut 2026-03-07:** Toutes les catégories ont une couverture minimale viable. Le plan ci-dessous a été exécuté — les sources Tier 1 ArcGIS sont toutes intégrées. Tier 2/3 = nice-to-have post-hackathon.
 
 ### Sources prioritaires à intégrer
 
@@ -590,4 +611,11 @@ CREATE TABLE civic_data.incidents (
 );
 ```
 
-*Last updated: 2026-03-06*
+### Embeddings backfill
+
+- Passe 1: properties + businesses + city_data originale (44K) → ~48K embeddings
+- Passe 2: 7 nouvelles sources ArcGIS (13,208 records) → en cours (log: `/tmp/embed_backfill2.log`)
+- Modèle: `gemini-embedding-001` (3072d), rate: 0.05s/req (~20 req/s)
+- Total estimé final: ~61K embeddings
+
+*Last updated: 2026-03-07*
