@@ -31,7 +31,7 @@ LAYER 1 — CITIZEN PLATFORM (Decidim 0.31.2, live at mgm.styxcore.dev)
 
 LAYER 2 — CIVIC DATA LAKE (real Montgomery open data, PostgreSQL + pgvector)
 
-  civic_data.city_data — Montgomery ArcGIS Open Data (~60,600 records, 19 sources):
+  civic_data.city_data — Montgomery ArcGIS Open Data (60,609 records, 19 sources):
     fire_incidents          ~20,000     business_licenses (2022+)  12,751
     code_violations         ~10,000     zoning_decisions            2,005
     building_permits          5,619     city_owned_property           681
@@ -156,7 +156,7 @@ momentum-mgm/
 | Day | Date | Milestone |
 |---|---|---|
 | 1 | Mar 5 | Decidim live at mgm.styxcore.dev |
-| 2 | Mar 6 | Data lake: Census + ArcGIS (12 sources, 44,608 records) + Zillow + Yelp |
+| 2 | Mar 6 | Data lake: Census + ArcGIS + Zillow + Yelp |
 | 3 | Mar 7 | MCP server 15 tools, data lake 44K→60K records, civic loop closed |
 | 4 | Mar 8 | End-to-end demo |
 | 5 | Mar 9 | Submission |
