@@ -1174,5 +1174,193 @@ Respond with just the comment text, no JSON."""
     }, ensure_ascii=False, indent=2)
 
 
+# ── TOOL 16 — get_meetings ──────────────────────────────────────────────────────
+@mcp.tool()
+async def get_meetings(upcoming_only: bool = False) -> str:
+    """
+    Returns all scheduled meetings and public hearings from Decidim.
+    Covers city council sessions, participatory process assemblies, public consultations.
+    upcoming_only=True returns only meetings with startTime in the future.
+    """
+    query = """
+    query {
+      participatoryProcesses {
+        title { translation(locale: "en") }
+        components {
+          ... on Meetings {
+            meetings(first: 100) {
+              nodes {
+                id
+                title { translation(locale: "en") }
+                description { translation(locale: "en") }
+                startTime
+                endTime
+                address
+                location { translation(locale: "en") }
+                attendeesCount
+                commentsCount
+              }
+            }
+          }
+        }
+      }
+    }"""
+    data = await graphql(query)
+    meetings = []
+    for proc in (data.get("data", {}).get("participatoryProcesses") or []):
+        proc_title = (proc.get("title") or {}).get("translation", "")
+        for comp in (proc.get("components") or []):
+            for node in (comp.get("meetings", {}).get("nodes") or []):
+                start = node.get("startTime", "")
+                if upcoming_only and start:
+                    from datetime import datetime, timezone
+                    try:
+                        dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+                        if dt < datetime.now(timezone.utc):
+                            continue
+                    except Exception:
+                        pass
+                meetings.append({
+                    "id": node.get("id"),
+                    "process": proc_title,
+                    "title": (node.get("title") or {}).get("translation", ""),
+                    "description": ((node.get("description") or {}).get("translation", "") or "")[:200],
+                    "start": start,
+                    "end": node.get("endTime", ""),
+                    "address": node.get("address", ""),
+                    "location": (node.get("location") or {}).get("translation", ""),
+                    "attendees": node.get("attendeesCount", 0),
+                    "comments": node.get("commentsCount", 0),
+                })
+
+    meetings.sort(key=lambda m: m.get("start") or "")
+    return json.dumps({
+        "total": len(meetings),
+        "filter": "upcoming only" if upcoming_only else "all",
+        "meetings": meetings,
+    }, ensure_ascii=False, indent=2)
+
+
+# ── TOOL 17 — summarize_comments ────────────────────────────────────────────────
+@mcp.tool()
+async def summarize_comments(proposal_id: str) -> str:
+    """
+    Fetches all citizen comments on a Decidim proposal and generates an AI summary
+    of community sentiment, key themes, concerns, and consensus points.
+    Returns structured JSON: sentiment, themes, concerns, support_level, summary.
+    """
+    query = """
+    query($id: ID!) {
+      proposal(id: $id) {
+        title { translation(locale: "en") }
+        body { translation(locale: "en") }
+        commentsCount
+        comments {
+          nodes {
+            id
+            body { translation(locale: "en") }
+            alignment
+            author { name }
+            createdAt
+          }
+        }
+      }
+    }"""
+    data = await graphql(query, {"id": proposal_id})
+    proposal = (data.get("data") or {}).get("proposal")
+
+    # Fallback: search through all proposals if direct query fails
+    if not proposal:
+        pq = """
+        query {
+          participatoryProcesses {
+            components {
+              ... on Proposals {
+                proposals(first: 200) {
+                  nodes {
+                    id
+                    title { translation(locale: "en") }
+                    body { translation(locale: "en") }
+                    commentsCount
+                    comments {
+                      nodes {
+                        id
+                        body { translation(locale: "en") }
+                        alignment
+                        author { name }
+                        createdAt
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }"""
+        pdata = await graphql(pq)
+        for proc in (pdata.get("data", {}).get("participatoryProcesses") or []):
+            for comp in (proc.get("components") or []):
+                for node in (comp.get("proposals", {}).get("nodes") or []):
+                    if str(node.get("id")) == str(proposal_id):
+                        proposal = node
+                        break
+
+    if not proposal:
+        return json.dumps({"error": f"Proposal {proposal_id} not found"})
+
+    title = (proposal.get("title") or {}).get("translation", "")
+    body = (proposal.get("body") or {}).get("translation", "")
+    comments = (proposal.get("comments") or {}).get("nodes") or []
+
+    if not comments:
+        return json.dumps({
+            "proposal_id": proposal_id,
+            "title": title,
+            "total_comments": 0,
+            "summary": "No citizen comments yet on this proposal.",
+        })
+
+    comment_texts = []
+    for c in comments:
+        text = (c.get("body") or {}).get("translation", "")
+        alignment = c.get("alignment", 0)
+        stance = "supports" if alignment == 1 else ("opposes" if alignment == -1 else "neutral")
+        if text:
+            comment_texts.append(f"[{stance}] {text[:300]}")
+
+    prompt = f"""Analyze citizen comments on this civic proposal and return a JSON object.
+
+Proposal: "{title}"
+Description: {body[:300]}
+
+Comments ({len(comment_texts)} total):
+{chr(10).join(comment_texts[:30])}
+
+Return JSON with this exact structure:
+{{
+  "sentiment": "positive|mixed|negative|neutral",
+  "support_level": "strong|moderate|divided|opposed",
+  "total_analyzed": {len(comment_texts)},
+  "key_themes": ["theme1", "theme2", "theme3"],
+  "main_concerns": ["concern1", "concern2"],
+  "consensus_points": ["point1", "point2"],
+  "summary": "2-3 sentence plain English summary of what citizens think"
+}}"""
+
+    raw = await _generate_json(prompt, temperature=0.1)
+    try:
+        result = json.loads(raw)
+        result["proposal_id"] = proposal_id
+        result["proposal_title"] = title
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception:
+        return json.dumps({
+            "proposal_id": proposal_id,
+            "title": title,
+            "total_comments": len(comments),
+            "summary": raw[:500],
+        })
+
+
 if __name__ == "__main__":
     mcp.run()
