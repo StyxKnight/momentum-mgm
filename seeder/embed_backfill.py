@@ -115,6 +115,7 @@ SOURCE_CATEGORY_MAP = {
     "behavioral_centers":    "health",
     "opportunity_zones":     "economy",
     "infrastructure_projects":"infrastructure",
+    "parks_recreation":      "parks_culture",
 }
 
 

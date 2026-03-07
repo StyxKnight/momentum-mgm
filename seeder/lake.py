@@ -962,6 +962,20 @@ ARCGIS_SOURCES = [
         "type_field":   "TypeProblem",
         "desc_field":   "Description",
     },
+    {
+        "name":         "parks_recreation",
+        "url":          f"{ARCGIS_BASE}/Park_and_Trail/FeatureServer/0",
+        "category":     "parks_culture",
+        "where":        "1=1",
+        "lat_field":    "Y",
+        "lon_field":    "X",
+        "addr_field":   "FULLADDR",
+        "zip_field":    None,
+        "status_field": "FACILITYTYPE",
+        "date_field":   "LASTUPDATE",
+        "type_field":   "FACILITYTYPE",
+        "desc_field":   "Description",
+    },
 ]
 
 
