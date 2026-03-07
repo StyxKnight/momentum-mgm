@@ -456,6 +456,34 @@ Recorded during Day 2 full doc audit. These are intentional deviations from orig
 - **Rationale:** Tout seuil arbitraire non ancré dans la littérature officielle crée un risque de contestation. Les quartiles sont défendables parce qu'ils sont relatifs à Montgomery elle-même — un quartier "critical" l'est par rapport aux 71 autres tracts de la ville.
 - **Sources:** UW Neighborhood Atlas ADI documentation; CDC/ATSDR SVI 2022 Technical Documentation; LISC Commercial Corridor Distress Framework.
 
+### [BUG-034] post_ai_response crash — result.get() sur None quand data:null
+- **Date:** 2026-03-07
+- **Symptôme:** `AttributeError: 'NoneType' object has no attribute 'get'` à la ligne `result.get("data", {}).get("commentable", {})`.
+- **Root cause:** `dict.get(key, default)` retourne `None` si la clé existe avec valeur `None`. Quand GraphQL retourne `{"data": null, "errors": null}`, `result.get("data", {})` → `None`, pas `{}`.
+- **Fix:** `(result.get("data") or {}).get("commentable") or {}` — le `or {}` s'applique après le `.get()`, pas avant.
+- **Leçon:** `.get(key, fallback)` ne protège pas contre `key: null`. Utiliser `(d.get(key) or fallback)` pour les champs GraphQL qui peuvent être `null`.
+
+### [BUG-035] summarize_comments — schema GraphQL Decidim 0.31 incompatible
+- **Date:** 2026-03-07
+- **Symptôme:** "Proposal not found" + erreurs schema: `Field 'nodes' doesn't exist on type 'Comment'`, `Field 'commentsCount' doesn't exist on type 'Proposal'`, `Selections can't be made on scalars (field 'body' returns String)`.
+- **Root cause:** 3 différences Decidim 0.31 vs ce qu'on assumait:
+  1. `comments` sur Proposal = array direct, **pas une connection** (pas de `.nodes`)
+  2. `body` sur Comment = **String scalaire**, pas `TranslatedField` (pas de `{ translation(...) }`)
+  3. `commentsCount` **n'existe pas** sur le type Proposal
+- **Fix:** Query simplifiée: `comments { id body alignment }` — body est un String directement.
+- **Note schema:** Contraste avec Proposal où `title` et `body` sont des `TranslatedField`. Comments ont leur propre structure.
+
+### [BUG-036] inject_decidim.rb — nickname Decidim lowercase seulement
+- **Date:** 2026-03-07
+- **Symptôme:** "Nickname is invalid" pour tous les 20 citoyens.
+- **Root cause:** Decidim valide les nicknames avec regex `\A[a-z0-9_\-]+\z` — **pas de majuscules**. `MarcusJenkins` invalide, `marcus_jenkins` valide.
+- **Fix:** `nickname = "#{first}_#{last}".downcase.gsub(/[^a-z0-9_]/, '')`.
+
+### [BUG-037] Meetings — registration_type enum invalide
+- **Date:** 2026-03-07
+- **Symptôme:** `'disabled' is not a valid registration_type (ArgumentError)`.
+- **Fix:** Valeur correcte = `'registration_disabled'`. Vérifier avec `Decidim::Meetings::Meeting.registration_types.keys`.
+
 ### [DECISION-004] Découplage prompts / code — templates Jinja2
 - **Date:** 2026-03-07
 - **Contexte:** Les prompts LLM dans server.py étaient hardcodés comme f-strings Python, mélangés avec la logique de tool.
