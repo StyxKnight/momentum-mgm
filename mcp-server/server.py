@@ -1162,7 +1162,7 @@ Respond with just the comment text, no JSON."""
     if errors:
         return json.dumps({"error": errors[0]["message"], "proposal_id": proposal_id})
 
-    comment = result.get("data", {}).get("commentable", {}).get("addComment", {})
+    comment = ((result.get("data") or {}).get("commentable") or {}).get("addComment") or {}
     return json.dumps({
         "status": "posted",
         "proposal_id": proposal_id,
@@ -1249,68 +1249,39 @@ async def summarize_comments(proposal_id: str) -> str:
     of community sentiment, key themes, concerns, and consensus points.
     Returns structured JSON: sentiment, themes, concerns, support_level, summary.
     """
-    query = """
-    query($id: ID!) {
-      proposal(id: $id) {
-        title { translation(locale: "en") }
-        body { translation(locale: "en") }
-        commentsCount
-        comments {
-          nodes {
-            id
-            body { translation(locale: "en") }
-            alignment
-            author { name }
-            createdAt
+    # Query all proposals with comments — body on Comment is a String (not TranslatedField)
+    pq = """
+    query {
+      participatoryProcesses {
+        components {
+          ... on Proposals {
+            proposals(first: 200) {
+              nodes {
+                id
+                title { translation(locale: "en") }
+                body { translation(locale: "en") }
+                comments { id body alignment }
+              }
+            }
           }
         }
       }
     }"""
-    data = await graphql(query, {"id": proposal_id})
-    proposal = (data.get("data") or {}).get("proposal")
-
-    # Fallback: search through all proposals if direct query fails
-    if not proposal:
-        pq = """
-        query {
-          participatoryProcesses {
-            components {
-              ... on Proposals {
-                proposals(first: 200) {
-                  nodes {
-                    id
-                    title { translation(locale: "en") }
-                    body { translation(locale: "en") }
-                    commentsCount
-                    comments {
-                      nodes {
-                        id
-                        body { translation(locale: "en") }
-                        alignment
-                        author { name }
-                        createdAt
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }"""
-        pdata = await graphql(pq)
-        for proc in (pdata.get("data", {}).get("participatoryProcesses") or []):
-            for comp in (proc.get("components") or []):
-                for node in (comp.get("proposals", {}).get("nodes") or []):
-                    if str(node.get("id")) == str(proposal_id):
-                        proposal = node
-                        break
+    pdata = await graphql(pq)
+    proposal = None
+    for proc in (pdata.get("data", {}).get("participatoryProcesses") or []):
+        for comp in (proc.get("components") or []):
+            for node in (comp.get("proposals", {}).get("nodes") or []):
+                if str(node.get("id")) == str(proposal_id):
+                    proposal = node
+                    break
 
     if not proposal:
         return json.dumps({"error": f"Proposal {proposal_id} not found"})
 
     title = (proposal.get("title") or {}).get("translation", "")
     body = (proposal.get("body") or {}).get("translation", "")
-    comments = (proposal.get("comments") or {}).get("nodes") or []
+    comments = proposal.get("comments") or []
 
     if not comments:
         return json.dumps({
@@ -1322,11 +1293,11 @@ async def summarize_comments(proposal_id: str) -> str:
 
     comment_texts = []
     for c in comments:
-        text = (c.get("body") or {}).get("translation", "")
+        text = c.get("body") or ""  # body is a plain String on Comment
         alignment = c.get("alignment", 0)
         stance = "supports" if alignment == 1 else ("opposes" if alignment == -1 else "neutral")
         if text:
-            comment_texts.append(f"[{stance}] {text[:300]}")
+            comment_texts.append(f"[{stance}] {str(text)[:300]}")
 
     prompt = f"""Analyze citizen comments on this civic proposal and return a JSON object.
 
