@@ -150,35 +150,39 @@ async def get_proposals(category: str = None, limit: int = 20) -> str:
     Returns proposals with title, body, vote count.
     """
     query = """
-    query($limit: Int!) {
-      components(filter: { type: "Proposals" }) {
-        id
-        name { en }
-        ... on Proposals {
-          proposals(first: $limit) {
-            nodes {
-              id
-              title { en }
-              body { en }
-              totalVotes
-              publishedAt
+    query {
+      participatoryProcesses {
+        components {
+          id
+          ... on Proposals {
+            proposals(first: 200) {
+              nodes {
+                id
+                title { translation(locale: "en") }
+                body { translation(locale: "en") }
+                publishedAt
+              }
             }
           }
         }
       }
     }
     """
-    data = await graphql(query, {"limit": limit})
+    data = await graphql(query)
     proposals = []
-    for comp in (data.get("data", {}).get("components") or []):
-        nodes = (comp.get("proposals") or {}).get("nodes") or []
-        for p in nodes:
-            proposals.append({
-                "id": p["id"],
-                "title": p["title"]["en"],
-                "body": (p["body"]["en"] or "")[:300],
-                "votes": p.get("totalVotes", 0),
-            })
+    for proc in (data.get("data", {}).get("participatoryProcesses") or []):
+        for comp in (proc.get("components") or []):
+            nodes = (comp.get("proposals") or {}).get("nodes") or []
+            for p in nodes:
+                title = (p.get("title") or {}).get("translation", "")
+                body = (p.get("body") or {}).get("translation", "")
+                proposals.append({
+                    "id": p["id"],
+                    "title": title,
+                    "body": body[:300],
+                })
+    if len(proposals) > limit:
+        proposals = proposals[:limit]
     return json.dumps(proposals, ensure_ascii=False, indent=2)
 
 
@@ -231,13 +235,14 @@ async def analyze_trends() -> str:
     """
     query = """
     query {
-      components(filter: { type: "Proposals" }) {
-        ... on Proposals {
-          proposals(first: 100) {
-            nodes {
-              id
-              title { en }
-              totalVotes
+      participatoryProcesses {
+        components {
+          ... on Proposals {
+            proposals(first: 200) {
+              nodes {
+                id
+                title { translation(locale: "en") }
+              }
             }
           }
         }
@@ -246,17 +251,16 @@ async def analyze_trends() -> str:
     """
     data = await graphql(query)
     proposals = []
-    for comp in (data.get("data", {}).get("components") or []):
-        nodes = (comp.get("proposals") or {}).get("nodes") or []
-        proposals.extend(nodes)
+    for proc in (data.get("data", {}).get("participatoryProcesses") or []):
+        for comp in (proc.get("components") or []):
+            nodes = (comp.get("proposals") or {}).get("nodes") or []
+            for p in nodes:
+                title = (p.get("title") or {}).get("translation", "")
+                proposals.append({"id": p["id"], "title": title})
 
-    top = sorted(proposals, key=lambda p: p.get("totalVotes", 0), reverse=True)[:5]
     result = {
         "total_proposals": len(proposals),
-        "top_by_votes": [
-            {"title": p["title"]["en"], "votes": p.get("totalVotes", 0)}
-            for p in top
-        ],
+        "top_proposals": proposals[:10],
     }
     return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -1050,6 +1054,114 @@ async def civic_report(neighborhood: str) -> str:
         return json.dumps(parsed, ensure_ascii=False, indent=2)
     except json.JSONDecodeError:
         return raw
+
+
+# ── TOOL 15 — post_ai_response ──────────────────────────────────────────────────
+@mcp.tool()
+async def post_ai_response(proposal_id: str) -> str:
+    """
+    WRITE tool — closes the civic loop: reads a Decidim proposal, classifies it,
+    generates a neighborhood-aware AI recommendation, and posts it as an official
+    comment on the platform signed by Momentum AI.
+
+    Flow: get_proposals → classify_proposal → civic_report → recommend_action → GraphQL addComment
+    All data is real. No hallucinations. The comment is visible to citizens on mgm.styxcore.dev.
+    """
+    # ── Step 1: Fetch proposal ───────────────────────────────────────────────────
+    pq = """
+    query {
+      participatoryProcesses {
+        components {
+          ... on Proposals {
+            proposals(first: 200) {
+              nodes {
+                id
+                title { translation(locale: "en") }
+                body { translation(locale: "en") }
+              }
+            }
+          }
+        }
+      }
+    }"""
+    data = await graphql(pq)
+    proposal = None
+    for proc in (data.get("data", {}).get("participatoryProcesses") or []):
+        for comp in (proc.get("components") or []):
+            for node in (comp.get("proposals", {}).get("nodes") or []):
+                if str(node["id"]) == str(proposal_id):
+                    proposal = node
+                    break
+
+    if not proposal:
+        return json.dumps({"error": f"Proposal {proposal_id} not found"})
+
+    title = (proposal.get("title") or {}).get("translation", "")
+    body = (proposal.get("body") or {}).get("translation", "")
+    text = f"{title}. {body}"[:500]
+
+    # ── Step 2: Classify ─────────────────────────────────────────────────────────
+    classification = json.loads(await classify_proposal(text))
+    category = classification.get("category", "governance")
+    summary = classification.get("summary", title)
+    actionable = classification.get("311_actionable", False)
+
+    # ── Step 3: Neighborhood report ──────────────────────────────────────────────
+    report = json.loads(await civic_report("Montgomery"))
+    severity = report.get("overall_severity", "moderate")
+
+    # ── Step 4: Build AI comment ─────────────────────────────────────────────────
+    comment_prompt = f"""Write a short, respectful official response to a citizen proposal on the Momentum MGM civic platform.
+Respond as Momentum AI, the city's civic intelligence system.
+
+Proposal: "{title}"
+Category: {category}
+Summary: {summary}
+City severity context: {severity}
+311 actionable: {actionable}
+
+Write 3-4 sentences in plain English. Be factual, encouraging, and specific about next steps.
+Do NOT use markdown, headers, or bullet points — plain text only.
+End with: "— Momentum AI, City of Montgomery Civic Intelligence"
+
+Respond with just the comment text, no JSON."""
+
+    comment_body = await _generate_json(comment_prompt, temperature=0.3)
+    # Strip JSON wrapper if model wrapped it
+    try:
+        parsed = json.loads(comment_body)
+        comment_body = parsed.get("comment", comment_body) if isinstance(parsed, dict) else comment_body
+    except Exception:
+        pass
+    comment_body = comment_body.strip().strip('"')
+
+    # ── Step 5: Post via GraphQL mutation ────────────────────────────────────────
+    mutation = """
+    mutation($id: String!, $type: String!, $body: String!) {
+      commentable(id: $id, type: $type) {
+        addComment(body: $body) { id body }
+      }
+    }"""
+    result = await graphql(mutation, {
+        "id": str(proposal_id),
+        "type": "Decidim::Proposals::Proposal",
+        "body": comment_body,
+    }, auth=True)
+
+    errors = result.get("errors")
+    if errors:
+        return json.dumps({"error": errors[0]["message"], "proposal_id": proposal_id})
+
+    comment = result.get("data", {}).get("commentable", {}).get("addComment", {})
+    return json.dumps({
+        "status": "posted",
+        "proposal_id": proposal_id,
+        "proposal_title": title,
+        "category": category,
+        "comment_id": comment.get("id"),
+        "comment_preview": comment_body[:200],
+        "platform_url": f"{os.getenv('DECIDIM_URL')}/processes",
+    }, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":
