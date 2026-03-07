@@ -593,7 +593,9 @@ def get_city_incidents(source: str, neighborhood: str = None) -> str:
     source must be one of: code_violations, building_permits, fire_incidents,
     housing_condition, food_safety, environmental_nuisance, transit_stops,
     education_facilities, behavioral_centers, infrastructure_projects,
-    citizen_reports, opportunity_zones.
+    citizen_reports, opportunity_zones, business_licenses, historic_markers,
+    community_centers, education_facility, parks_recreation, city_owned_property,
+    zoning_decisions.
     Use source='list' to get available sources and their total counts.
     neighborhood=None returns city-wide totals.
     """
@@ -601,9 +603,15 @@ def get_city_incidents(source: str, neighborhood: str = None) -> str:
         "code_violations", "building_permits", "fire_incidents", "housing_condition",
         "food_safety", "environmental_nuisance", "transit_stops", "education_facilities",
         "behavioral_centers", "infrastructure_projects", "citizen_reports", "opportunity_zones",
+        # Expansion 2026-03-07 — 4 new sources
+        "business_licenses", "historic_markers", "community_centers", "education_facility",
+        "parks_recreation", "city_owned_property", "zoning_decisions",
     ]
     # Sources with meaningful status breakdowns
-    STATUS_SOURCES = {"code_violations", "building_permits", "infrastructure_projects"}
+    STATUS_SOURCES = {
+        "code_violations", "building_permits", "infrastructure_projects",
+        "business_licenses", "community_centers", "city_owned_property", "zoning_decisions",
+    }
 
     conn = get_db()
 
@@ -1009,7 +1017,9 @@ async def civic_report(neighborhood: str) -> str:
     census   = json.loads(get_census_trend(neighborhood))
     incidents_list = []
     for source in ["code_violations", "building_permits", "fire_incidents",
-                   "housing_condition", "food_safety", "environmental_nuisance"]:
+                   "housing_condition", "food_safety", "environmental_nuisance",
+                   "business_licenses", "transit_stops", "city_owned_property",
+                   "zoning_decisions", "parks_recreation", "community_centers"]:
         inc = json.loads(get_city_incidents(source, neighborhood))
         if inc.get("total", 0) > 0:
             incidents_list.append(inc)
