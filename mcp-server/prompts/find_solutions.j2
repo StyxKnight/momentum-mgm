@@ -41,9 +41,9 @@ No results found.
 [INSTRUCTIONS]
 Using ONLY the search results above as your source for federal programs and comparable cities:
 - Federal programs must appear in the search results above — do not invent programs.
-- Comparable cities must appear in the search results above — do not invent examples.
+- Comparable cities: extract ANY city mentioned in the global search results (even as an example or case study). If the article mentions Chicago, St. Louis, Rochester — include them. Do not invent cities not mentioned in the results.
 - Montgomery recommendations must be grounded in the real statistics from DATA.
-- If search results are sparse, return fewer items rather than hallucinating.
+- If a field is unavailable from the search results, use null. Do not leave comparable_cities empty if any city is mentioned in the results.
 
 [OUTPUT SCHEMA]
 {
@@ -53,16 +53,14 @@ Using ONLY the search results above as your source for federal programs and comp
       "agency": "HUD / EPA / DOT / USDA / etc.",
       "description": "What it funds",
       "eligibility": "Key eligibility criteria relevant to Montgomery AL",
-      "typical_grant": "$X - $Y",
       "source_url": "URL from search results"
     }
   ],
   "comparable_cities": [
     {
       "city": "City, State or Country",
-      "problem_solved": "Similar issue they addressed",
-      "approach": "What they did",
-      "outcome": "Measurable result",
+      "approach": "What they did (from search results)",
+      "lesson": "Key takeaway for Montgomery",
       "source_url": "URL from search results"
     }
   ],

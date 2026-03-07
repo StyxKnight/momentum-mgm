@@ -102,6 +102,81 @@ def backfill_businesses(conn):
     log.info(f"  Businesses done: {len(rows)} embedded")
 
 
+SOURCE_CATEGORY_MAP = {
+    "fire_incidents":        "public_safety",
+    "code_violations":       "housing",
+    "building_permits":      "housing",
+    "housing_condition":     "housing",
+    "transit_stops":         "transportation",
+    "food_safety":           "health",
+    "environmental_nuisance":"environment",
+    "education_facilities":  "education",
+    "citizen_reports":       "governance",
+    "behavioral_centers":    "health",
+    "opportunity_zones":     "economy",
+    "infrastructure_projects":"infrastructure",
+}
+
+
+def backfill_city_data(conn, batch_size: int = 100):
+    log.info("Backfilling city_data (ArcGIS — 44K records)...")
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT COUNT(*) FROM civic_data.city_data cd
+            WHERE NOT EXISTS (
+                SELECT 1 FROM civic_data.embeddings e
+                WHERE e.source_table = 'city_data' AND e.source_id = cd.id
+            )
+        """)
+        total_pending = cur.fetchone()[0]
+    log.info(f"  {total_pending} city_data records to embed")
+
+    embedded = 0
+    offset = 0
+    while True:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT cd.id, cd.source, cd.category, cd.neighborhood,
+                       cd.address, cd.status, cd.reported_at
+                FROM civic_data.city_data cd
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM civic_data.embeddings e
+                    WHERE e.source_table = 'city_data' AND e.source_id = cd.id
+                )
+                ORDER BY cd.reported_at DESC NULLS LAST
+                LIMIT %s
+            """, (batch_size,))
+            rows = cur.fetchall()
+
+        if not rows:
+            break
+
+        for r in rows:
+            source = r["source"] or "unknown"
+            neighborhood = r["neighborhood"] or "Montgomery"
+            address = r["address"] or ""
+            status = r["status"] or ""
+            reported = str(r["reported_at"])[:10] if r["reported_at"] else ""
+            category = SOURCE_CATEGORY_MAP.get(source, "governance")
+
+            content = f"{source.replace('_', ' ').title()} at {address} in {neighborhood}"
+            if status:
+                content += f" — {status}"
+            if reported:
+                content += f" ({reported})"
+
+            vec = embed(content)
+            if vec:
+                store(conn, "city_data", str(r["id"]), neighborhood, category, content, vec)
+                embedded += 1
+
+        offset += len(rows)
+        log.info(f"  {offset}/{total_pending} processed, {embedded} embedded so far")
+        time.sleep(0.05)  # ~20 req/s — stay under Gemini embedding rate limit
+
+    log.info(f"  city_data done: {embedded} embedded")
+
+
 def main():
     if not GOOGLE_API_KEY:
         log.error("GOOGLE_API_KEY not set")
@@ -109,6 +184,7 @@ def main():
     conn = psycopg2.connect(**DB)
     backfill_properties(conn)
     backfill_businesses(conn)
+    backfill_city_data(conn)
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM civic_data.embeddings")
         total = cur.fetchone()[0]

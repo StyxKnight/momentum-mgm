@@ -219,13 +219,7 @@ Respond in JSON only:
   "311_note": "If 311_actionable is true, what 311 service request this could generate. Otherwise null."
 }}"""
 
-    r = await openrouter.chat.completions.create(
-        model="google/gemini-flash-1.5",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=250,
-        response_format={"type": "json_object"},
-    )
-    return r.choices[0].message.content
+    return await _generate_json(prompt)
 
 
 # ── TOOL 3 ─────────────────────────────────────────────────────────────────────
@@ -293,13 +287,7 @@ Provide a concrete action recommendation in JSON:
   "next_steps": ["step1", "step2", "step3"]
 }}"""
 
-    r = await openrouter.chat.completions.create(
-        model="google/gemini-flash-1.5",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=400,
-        response_format={"type": "json_object"},
-    )
-    return r.choices[0].message.content
+    return await _generate_json(prompt)
 
 
 # ── TOOL 5 ─────────────────────────────────────────────────────────────────────
@@ -762,7 +750,7 @@ async def find_solutions(problem: str, neighborhood: str = None) -> str:
 
     # ── 3 parallel Brave searches ───────────────────────────────────────────────
     federal_q   = f"{problem} federal grant program HUD EPA DOT USDA CDBG active 2025 2026"
-    global_q    = f"cities solved \"{problem}\" best practices results worldwide"
+    global_q    = f"{problem} city case study success program results neighborhood"
     local_q     = f"Montgomery Alabama {problem} funding solution program"
 
     federal_res, global_res, local_res = await asyncio.gather(
