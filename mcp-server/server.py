@@ -745,10 +745,11 @@ async def find_solutions(problem: str, neighborhood: str = None) -> str:
     """
     import asyncio
 
-    # ── Real Montgomery stats from Census ───────────────────────────────────────
+    # ── Real Montgomery stats: Census trends + incidents + deprivation scores ───
     conn = get_db()
     city_stats = {}
     with conn.cursor() as cur:
+        # Latest values
         cur.execute("""
             SELECT metric, ROUND(AVG(value)::numeric, 1) as val
             FROM civic_data.census
@@ -757,19 +758,94 @@ async def find_solutions(problem: str, neighborhood: str = None) -> str:
               AND value > 0
             GROUP BY metric
         """)
-        city_stats = {r[0]: float(r[1]) for r in cur.fetchall()}
+        city_stats["current"] = {r[0]: float(r[1]) for r in cur.fetchall()}
+
+        # 14-year trends (slope + R²) if neighborhood given
+        if neighborhood:
+            cur.execute("""
+                SELECT metric,
+                       ROUND(regr_slope(value, year)::numeric, 2) as slope,
+                       ROUND(regr_r2(value, year)::numeric, 3) as r2,
+                       MIN(value) as baseline, MAX(value) as current_val
+                FROM civic_data.census
+                WHERE neighborhood ILIKE %s
+                AND metric IN ('median_income','poverty_below','unemployed','housing_vacant','median_rent')
+                GROUP BY metric HAVING COUNT(*) >= 3
+            """, (f"%{neighborhood}%",))
+            rows = cur.fetchall()
+            if rows:
+                city_stats["trends"] = {
+                    r[0]: {"slope_per_year": float(r[1]), "r2": float(r[2]),
+                            "baseline": float(r[3]), "current_val": float(r[4]),
+                            "direction": "improving" if (float(r[1]) > 0 and r[0] in ("median_income","median_rent")) else ("declining" if float(r[1]) < 0 else "stable")}
+                    for r in rows
+                }
+
+        # Incidents count
+        if neighborhood:
+            cur.execute("""
+                SELECT source, COUNT(*) as cnt FROM civic_data.city_data
+                WHERE neighborhood ILIKE %s GROUP BY source ORDER BY cnt DESC LIMIT 5
+            """, (f"%{neighborhood}%",))
+            city_stats["top_incidents"] = {r[0]: int(r[1]) for r in cur.fetchall()}
+
     conn.close()
 
-    # ── 3 parallel Brave searches ───────────────────────────────────────────────
-    federal_q   = f"{problem} federal grant program HUD EPA DOT USDA CDBG active 2025 2026"
-    global_q    = f"{problem} city case study success program results neighborhood"
-    local_q     = f"Montgomery Alabama {problem} funding solution program"
+    # Add deprivation scores
+    if neighborhood:
+        try:
+            scores_raw = json.loads(analyze_neighborhood(neighborhood, "all"))
+            city_stats["deprivation_scores"] = {
+                k: {"score": v.get("score"), "interpretation": v.get("interpretation")}
+                for k, v in (scores_raw.get("scores") or {}).items()
+            }
+        except Exception:
+            pass
 
-    federal_res, global_res, local_res = await asyncio.gather(
-        _brave_search(federal_q, count=5),
-        _brave_search(global_q, count=5),
-        _brave_search(local_q, count=3),
-    )
+    # ── Build category-specific search queries from actual ArcGIS data ──────────
+    SOURCE_TO_CATEGORY = {
+        "fire_incidents": ("public safety fire prevention", "FEMA AFG SAFER DOJ fire grant"),
+        "code_violations": ("housing code enforcement blight", "HUD CDBG housing rehabilitation lead hazard"),
+        "building_permits": ("construction development permits", "HUD HOME affordable housing development"),
+        "housing_condition": ("housing quality substandard", "HUD Choice Neighborhoods HOME rehabilitation"),
+        "food_safety": ("food safety restaurant inspection", "USDA food safety FDA grant community"),
+        "environmental_nuisance": ("environmental pollution contamination", "EPA brownfields EJI environmental justice grant"),
+        "transit_stops": ("public transit transportation access", "DOT FTA transit grant mobility"),
+        "education_facilities": ("school education quality", "DOE Title I education grant community school"),
+        "business_licenses": ("small business economic development", "SBA EDA economic development grant"),
+        "parks_recreation": ("parks green space recreation", "DOI Land Water Conservation Fund recreation grant"),
+        "community_centers": ("community services social programs", "HHS CSBG community services block grant"),
+        "infrastructure_projects": ("infrastructure roads utilities", "DOT RAISE BUILD infrastructure grant"),
+        "opportunity_zones": ("economic opportunity investment", "Treasury Opportunity Zone tax incentive investment"),
+        "behavioral_centers": ("mental health substance abuse", "SAMHSA HHS behavioral health grant"),
+        "citizen_reports": ("neighborhood quality of life", "HUD community development grant"),
+    }
+
+    top_incidents = city_stats.get("top_incidents", {})
+    geo = f"Montgomery Alabama {neighborhood}" if neighborhood else "Montgomery Alabama"
+
+    # Build targeted queries from top 2 incident categories
+    category_queries = []
+    for source, count in list(top_incidents.items())[:2]:
+        if source in SOURCE_TO_CATEGORY:
+            civic_kw, federal_kw = SOURCE_TO_CATEGORY[source]
+            category_queries.append(f"{geo} {civic_kw} {federal_kw} 2025 2026 grant funding application")
+
+    # Always include a global best practices query
+    top_issues = " ".join(list(top_incidents.keys())[:3]) if top_incidents else problem
+    global_q = f"{top_issues} city neighborhood turnaround success measurable results worldwide case study"
+    local_q  = f"{geo} {top_issues} program solution results 2024 2025"
+
+    # Run all searches in parallel
+    search_coros = [_brave_search(q, count=4) for q in category_queries]
+    search_coros += [_brave_search(global_q, count=5), _brave_search(local_q, count=3)]
+    search_results = await asyncio.gather(*search_coros)
+
+    federal_res = []
+    for r in search_results[:-2]:
+        federal_res.extend(r)
+    global_res = search_results[-2]
+    local_res  = search_results[-1]
 
     # ── Render Jinja2 prompt ────────────────────────────────────────────────────
     prompt = _render("find_solutions.j2",
@@ -1331,6 +1407,341 @@ Return JSON with this exact structure:
             "total_comments": len(comments),
             "summary": raw[:500],
         })
+
+
+# ─────────────────────────────────────────────
+# TOOL 18 — export_to_sheet
+# ─────────────────────────────────────────────
+@mcp.tool()
+async def export_to_sheet(neighborhood: str) -> str:
+    """Export all civic data for a neighborhood to Google Sheets (Census trends, incidents, business health, ADI/SVI/EJI scores)."""
+    import workspace_client as ws
+    from datetime import datetime
+
+    sheet_id, sheet_url = ws.create_or_get_sheet("Momentum MGM — Civic Intelligence")
+
+    results = {}
+    errors = []
+
+    try:
+        results["census"] = json.loads(get_census_trend(neighborhood))
+    except Exception as e:
+        errors.append(f"census: {e}")
+
+    try:
+        results["incidents"] = json.loads(get_city_incidents("list", neighborhood))
+    except Exception as e:
+        errors.append(f"incidents: {e}")
+
+    try:
+        results["business"] = json.loads(get_business_health(neighborhood))
+    except Exception as e:
+        errors.append(f"business: {e}")
+
+    try:
+        results["scores"] = json.loads(analyze_neighborhood(neighborhood, "all"))
+    except Exception as e:
+        errors.append(f"scores: {e}")
+
+    rows_written = 0
+
+    # Tab 1: Census trends
+    census = results.get("census", {})
+    if census and not census.get("error"):
+        metrics = census.get("metrics", {})
+        rows = [["Metric", "Baseline (2012)", "Current (2024)", "Change/yr", "R²", "Projection 2026"]]
+        for metric_name, m in metrics.items():
+            rows.append([
+                metric_name,
+                m.get("baseline", ""),
+                m.get("current", ""),
+                m.get("slope_per_year", ""),
+                m.get("r2", ""),
+                m.get("projection_2026", ""),
+            ])
+        ws.write_to_sheet(sheet_id, f"{neighborhood} — Census", rows)
+        rows_written += len(rows)
+
+    # Tab 2: Incidents
+    incidents = results.get("incidents", {})
+    if incidents and not incidents.get("error"):
+        available = incidents.get("available_sources", {}) or {}
+        rows = [["Source", "Count"]]
+        for source, count in available.items():
+            rows.append([source, count])
+        ws.write_to_sheet(sheet_id, f"{neighborhood} — Incidents", rows)
+        rows_written += len(rows)
+
+    # Tab 3: Business health
+    biz = results.get("business", {})
+    if biz and not biz.get("error"):
+        closed = biz.get("closed", 0)
+        total = biz.get("total", 0)
+        closure_rate = round(closed / total * 100, 1) if total else 0
+        rows = [
+            ["Metric", "Value"],
+            ["Total Businesses", total],
+            ["Closed", closed],
+            ["Closure Rate", f"{closure_rate}%"],
+            ["Avg Rating", biz.get("avg_rating", "")],
+            ["Avg Reviews", biz.get("avg_reviews", "")],
+        ]
+        cats = biz.get("top_categories", {}) or {}
+        if cats:
+            rows.append(["", ""])
+            rows.append(["Top Categories", "Count"])
+            for cat, cnt in list(cats.items())[:5]:
+                rows.append([cat, cnt])
+        ws.write_to_sheet(sheet_id, f"{neighborhood} — Business", rows)
+        rows_written += len(rows)
+
+    # Tab 4: ADI/SVI/EJI scores
+    scores_data = results.get("scores", {})
+    if scores_data and not scores_data.get("error"):
+        score_dict = scores_data.get("scores", {}) or {}
+        rows = [["Index", "Score", "Interpretation", "Top Factor", "Low Confidence"]]
+        for idx in ["ADI", "SVI", "EJI"]:
+            d = score_dict.get(idx, {}) or {}
+            top = (d.get("top_factors") or [{}])[0]
+            rows.append([
+                idx,
+                d.get("score", ""),
+                d.get("interpretation", ""),
+                top.get("variable", ""),
+                d.get("low_confidence", ""),
+            ])
+        ws.write_to_sheet(sheet_id, "Scores ADI-SVI-EJI", rows)
+        rows_written += len(rows)
+
+    return json.dumps({
+        "sheet_url": sheet_url,
+        "neighborhood": neighborhood,
+        "rows_written": rows_written,
+        "tabs_created": 4,
+        "errors": errors,
+        "exported_at": datetime.now().isoformat(),
+    }, ensure_ascii=False, indent=2)
+
+
+# ─────────────────────────────────────────────
+# TOOL 19 — create_report_doc
+# ─────────────────────────────────────────────
+@mcp.tool()
+async def create_report_doc(neighborhood: str) -> str:
+    """Generate a full civic intelligence report as a Google Doc shared with the admin."""
+    import workspace_client as ws
+    from datetime import datetime
+
+    date_str = datetime.now().strftime("%B %d, %Y")
+    title = f"Civic Intelligence Report — {neighborhood} — {date_str}"
+
+    report_data = {}
+    solutions_data = {}
+
+    try:
+        report_raw = await civic_report(neighborhood)
+        report_data = json.loads(report_raw)
+    except Exception as e:
+        report_data = {"error": str(e)}
+
+    try:
+        # Build specific problem string from actual findings
+        declining = [f.get("metric_cited","") for f in (report_data.get("findings") or []) if f.get("trend") == "declining"]
+        severity = report_data.get("overall_severity", "high")
+        problem_str = f"{severity} severity neighborhood — issues: {', '.join(declining) if declining else 'housing, poverty, infrastructure'}"
+        solutions_raw = await find_solutions(problem_str, neighborhood)
+        solutions_data = json.loads(solutions_raw)
+    except Exception as e:
+        solutions_data = {"error": str(e)}
+
+    # Get deprivation scores separately
+    scores_raw = analyze_neighborhood(neighborhood, "all")
+    scores_data = json.loads(scores_raw)
+    score_dict = scores_data.get("scores", {}) or {}
+
+    # ── Rewrite as executive briefing prose via Gemini ──────────────────────────
+    briefing_prompt = f"""You are a senior policy analyst writing a municipal briefing document for the City of Montgomery, Alabama city council.
+Rewrite the following civic intelligence data as a professional, readable government briefing.
+
+Rules:
+- Write in complete sentences and paragraphs. No bullet points in the summary.
+- Explain what every abbreviation means the first time you use it.
+- Translate numbers into human impact: instead of "housing_vacant: 207.6", write "over 200 abandoned properties".
+- Use plain English that a city council member with no data science background can understand.
+- Keep each section concise: 2-4 sentences max per section.
+- Do NOT invent data not present below.
+
+RAW DATA:
+Neighborhood: {neighborhood}
+Overall severity: {report_data.get('overall_severity','')}
+Severity rationale: {report_data.get('severity_rationale','')}
+Strongest signal: {report_data.get('strongest_signal','')}
+Key findings: {json.dumps([f.get('finding','') for f in (report_data.get('findings') or [])], ensure_ascii=False)}
+Deprivation scores: {json.dumps({k: v.get('interpretation','') for k,v in score_dict.items()}, ensure_ascii=False)}
+Federal programs available: {json.dumps([p.get('name','') + ' — ' + p.get('description','') for p in (solutions_data.get('federal_programs') or [])], ensure_ascii=False)}
+Comparable cities: {json.dumps([c.get('city','') + ': ' + c.get('lesson','') for c in (solutions_data.get('comparable_cities') or [])], ensure_ascii=False)}
+Recommended actions: {json.dumps(solutions_data.get('montgomery_recommendations',[]), ensure_ascii=False)}
+Urgency: {solutions_data.get('urgency','')} — Timeline: {solutions_data.get('estimated_timeline','')}
+
+Return a JSON object with these exact keys:
+{{
+  "executive_summary": "3-4 sentence plain English overview of the neighborhood situation",
+  "situation_analysis": "2-3 sentences explaining what the deprivation scores mean in plain English",
+  "key_findings_prose": ["One clear sentence per finding, no jargon, no abbreviations"],
+  "federal_programs_prose": ["One paragraph per program: what it is, how much money, why it fits this neighborhood"],
+  "cities_prose": ["One sentence per city: what they did and the concrete result"],
+  "actions_prose": ["One clear action sentence per recommendation, written as a directive to city staff"],
+  "closing": "One sentence on urgency and timeline"
+}}"""
+
+    briefing_raw = await _generate_json(briefing_prompt, temperature=0.2)
+    try:
+        briefing = json.loads(briefing_raw)
+    except Exception:
+        briefing = {}
+
+    severity = report_data.get("overall_severity", "unknown").upper()
+    urgency = solutions_data.get("urgency", "")
+    timeline = solutions_data.get("estimated_timeline", "")
+
+    sections = []
+    sections.append((title, "h1"))
+    sections.append((f"Prepared by Momentum MGM Civic AI  —  mgm.styxcore.dev  —  {date_str}", "body"))
+    sections.append((f"Overall Severity: {severity}  |  Urgency: {urgency.upper() if urgency else ''}  |  Timeline: {timeline}", "body"))
+    sections.append(("", "body"))
+
+    sections.append(("EXECUTIVE SUMMARY", "h2"))
+    sections.append((briefing.get("executive_summary", report_data.get("severity_rationale", "")), "body"))
+    sections.append(("", "body"))
+
+    sections.append(("SITUATION ANALYSIS", "h2"))
+    sections.append((briefing.get("situation_analysis", ""), "body"))
+    sections.append(("", "body"))
+
+    sections.append(("KEY FINDINGS", "h2"))
+    for finding in (briefing.get("key_findings_prose") or [f.get("finding","") for f in (report_data.get("findings") or [])]):
+        sections.append((str(finding), "bullet"))
+    sections.append(("", "body"))
+
+    sections.append(("RECOMMENDED FEDERAL PROGRAMS", "h2"))
+    for prog_prose in (briefing.get("federal_programs_prose") or []):
+        sections.append((str(prog_prose), "bullet"))
+        sections.append(("", "body"))
+
+    sections.append(("COMPARABLE CITIES & BEST PRACTICES", "h2"))
+    for city_prose in (briefing.get("cities_prose") or []):
+        sections.append((str(city_prose), "bullet"))
+    sections.append(("", "body"))
+
+    sections.append(("GLOBAL BEST PRACTICES", "h2"))
+    for gp in (solutions_data.get("global_best_practices") or []):
+        line = f"{gp.get('city','')} — {gp.get('practice','')}. Result: {gp.get('outcome','')}"
+        sections.append((line, "bullet"))
+    sections.append(("", "body"))
+
+    sections.append(("RECOMMENDED ACTIONS FOR MONTGOMERY", "h2"))
+    if urgency:
+        sections.append((f"Priority level: {urgency.upper()} — Estimated timeline to see impact: {timeline}", "body"))
+    for action in (briefing.get("actions_prose") or solutions_data.get("montgomery_recommendations") or []):
+        sections.append((str(action), "bullet"))
+    sections.append(("", "body"))
+
+    if briefing.get("closing"):
+        sections.append((briefing["closing"], "body"))
+        sections.append(("", "body"))
+
+    sources = report_data.get("_sources", {}) or {}
+    sections.append(("DATA SOURCES", "h2"))
+    sections.append((f"Census data: {sources.get('census_tracts', 'U.S. Census ACS 5-year estimates 2012-2024')}", "body"))
+    sections.append((f"City incident data: {', '.join(sources.get('incidents_sources', []))}", "body"))
+    sections.append((f"Deprivation methodology: Area Deprivation Index (UW Madison/HRSA), Social Vulnerability Index (CDC/ATSDR), Environmental Justice Index (EPA)", "body"))
+    sections.append(("", "body"))
+    sections.append(("Generated by Momentum MGM Civic AI — mgm.styxcore.dev", "body"))
+
+    doc_id, doc_url = ws.create_doc(title, sections)
+
+    return json.dumps({
+        "doc_url": doc_url,
+        "title": title,
+        "shared_with": os.getenv("GOOGLE_ADMIN_EMAIL"),
+        "neighborhood": neighborhood,
+        "created_at": datetime.now().isoformat(),
+    }, ensure_ascii=False, indent=2)
+
+
+# ─────────────────────────────────────────────
+# TOOL 20 — sync_gcal
+# ─────────────────────────────────────────────
+@mcp.tool()
+async def sync_gcal() -> str:
+    """Sync all Decidim public meetings to Google Calendar. Creates calendar if needed."""
+    import workspace_client as ws
+    from datetime import datetime, timedelta, timezone
+
+    cal_service = ws.get_calendar_service()
+    cal_name = "Montgomery Civic — Public Meetings"
+    existing_cals = cal_service.calendarList().list().execute()
+    cal_id = None
+    for c in existing_cals.get("items", []):
+        if c.get("summary") == cal_name:
+            cal_id = c["id"]
+            break
+    if not cal_id:
+        cal_id, _ = ws.create_calendar(cal_name)
+
+    cal_url = f"https://calendar.google.com/calendar/r?cid={cal_id}"
+
+    meetings_raw = await get_meetings()
+    meetings_data = json.loads(meetings_raw)
+    meetings = meetings_data.get("meetings", [])
+
+    synced = 0
+    skipped = 0
+    errors = []
+
+    for m in meetings:
+        try:
+            start_str = m.get("start_time") or m.get("start")
+            end_str = m.get("end_time") or m.get("end")
+
+            if not start_str:
+                start_dt = datetime.now(timezone.utc) + timedelta(days=7)
+                end_dt = start_dt + timedelta(hours=1)
+                start_str = start_dt.isoformat()
+                end_str = end_dt.isoformat()
+            elif not end_str:
+                from dateutil import parser as dtparser
+                start_dt = dtparser.parse(start_str)
+                end_str = (start_dt + timedelta(hours=1)).isoformat()
+
+            title = m.get("title", "Montgomery Public Meeting")
+            description = m.get("description", "")
+            location = m.get("location", "Montgomery, AL")
+
+            event = {
+                "summary": f"[Momentum MGM] {title}",
+                "description": f"{description}\n\nView on Decidim: https://mgm.styxcore.dev",
+                "location": location,
+                "start": {"dateTime": start_str, "timeZone": "America/Chicago"},
+                "end": {"dateTime": end_str, "timeZone": "America/Chicago"},
+            }
+
+            result = ws.create_calendar_event(cal_id, event)
+            if result == "skipped":
+                skipped += 1
+            else:
+                synced += 1
+        except Exception as e:
+            errors.append(f"{m.get('title', '?')}: {e}")
+
+    return json.dumps({
+        "synced": synced,
+        "skipped": skipped,
+        "total_meetings": len(meetings),
+        "calendar_url": cal_url,
+        "calendar_id": cal_id,
+        "errors": errors,
+    }, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":

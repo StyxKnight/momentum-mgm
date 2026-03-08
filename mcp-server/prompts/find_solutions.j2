@@ -1,75 +1,114 @@
 {% include "base.j2" %}
 
-[TASK]
-You are a civic policy expert advising the City of Montgomery, Alabama.
-Find concrete, actionable solutions for the following problem.
-
+[SITUATION — Montgomery, Alabama: {{ neighborhood or "City-wide" }}]
 Problem: {{ problem }}
-{% if neighborhood %}Geographic focus: {{ neighborhood }}{% else %}Geographic focus: City-wide (Montgomery, AL){% endif %}
 
-[DATA — Montgomery real statistics (Census ACS, latest year)]
+[NEIGHBORHOOD DATA — Real Census ACS + ArcGIS + Deprivation Scores]
 {{ city_stats | tojson(indent=2) }}
-[/DATA]
+[/NEIGHBORHOOD DATA]
 
-[SEARCH RESULTS — Federal grant programs (live web search)]
+[SEARCH RESULTS — Federal grant programs (live web)]
 {% for r in federal_results %}
-- {{ r.title }}
-  {{ r.description }}
-  {{ r.url }}
+SOURCE: {{ r.url }}
+TITLE: {{ r.title }}
+CONTENT: {{ r.description }}
+---
 {% else %}
-No results found.
+No results.
 {% endfor %}
 
 [SEARCH RESULTS — Global best practices from cities worldwide]
 {% for r in global_results %}
-- {{ r.title }}
-  {{ r.description }}
-  {{ r.url }}
+SOURCE: {{ r.url }}
+TITLE: {{ r.title }}
+CONTENT: {{ r.description }}
+---
 {% else %}
-No results found.
+No results.
 {% endfor %}
 
-[SEARCH RESULTS — Montgomery-specific programs and context]
+[SEARCH RESULTS — Montgomery-specific context]
 {% for r in local_results %}
-- {{ r.title }}
-  {{ r.description }}
-  {{ r.url }}
+SOURCE: {{ r.url }}
+TITLE: {{ r.title }}
+CONTENT: {{ r.description }}
+---
 {% else %}
-No results found.
+No results.
 {% endfor %}
 
-[INSTRUCTIONS]
-Using ONLY the search results above as your source for federal programs and comparable cities:
-- Federal programs must appear in the search results above — do not invent programs.
-- Comparable cities: extract ANY city mentioned in the global search results (even as an example or case study). If the article mentions Chicago, St. Louis, Rochester — include them. Do not invent cities not mentioned in the results.
-- Montgomery recommendations must be grounded in the real statistics from DATA.
-- If a field is unavailable from the search results, use null. Do not leave comparable_cities empty if any city is mentioned in the results.
+[CHAIN OF THOUGHT — follow these steps before writing output]
+
+STEP 1 — DIAGNOSE THE REAL PROBLEM
+Read the neighborhood data above. Identify the 2-3 most severe, statistically reliable issues.
+Use R² > 0.6 as threshold for reliable trends. Note exact values, slopes, and severity ranks.
+Ask: what is the root cause chain? (e.g. declining income → rising vacancy → code violations → ADI score)
+
+STEP 2 — MATCH FEDERAL PROGRAMS TO THE SPECIFIC DATA
+For each federal program in search results: does it directly address the specific numbers above?
+- If housing_vacant is high → HUD HOME, CDBG housing rehab, Choice Neighborhoods
+- If poverty_below is high → CDBG LMI benefit, LIHTC, Community Services Block Grant
+- If code_violations are high → HUD Lead Hazard Reduction, EPA brownfields
+- If unemployed is high → DOL workforce grants, SBA small business programs
+Do NOT include a program if it doesn't match the actual data. Do NOT invent programs not in search results.
+For each match: note the specific dollar amounts, deadlines, and Alabama-specific contacts if mentioned.
+
+STEP 3 — EXTRACT REAL COMPARABLE CITIES
+From the global search results, extract cities that solved a problem SIMILAR to the specific numbers above.
+Note: what exact outcome did they achieve? (e.g. "reduced vacancy by 34% in 4 years")
+Lesson must directly apply to Montgomery's specific situation — not generic advice.
+
+STEP 4 — WRITE CONCRETE MONTGOMERY RECOMMENDATIONS
+Each recommendation must follow this structure:
+WHO (which city department or office) + WHAT (specific action, specific program name) + HOW MUCH (dollar amount or % of budget) + BY WHEN (deadline or timeframe) + WHY (cite the specific stat from DATA that justifies it)
+FORBIDDEN: "develop a program", "utilize funds", "establish a task force", "explore options"
+REQUIRED: specific office names, specific program names from search results, specific dollar figures from DATA or search results, specific deadlines if known
+
+STEP 5 — RATE URGENCY
+critical = ADI or SVI > 0.75 AND declining trend on 2+ metrics
+high = ADI or SVI > 0.50 AND at least 1 declining metric
+medium = scores 0.25-0.50, trends mixed
+low = scores < 0.25, trends stable or improving
 
 [OUTPUT SCHEMA]
 {
   "federal_programs": [
     {
-      "name": "Program name from search results",
-      "agency": "HUD / EPA / DOT / USDA / etc.",
-      "description": "What it funds",
-      "eligibility": "Key eligibility criteria relevant to Montgomery AL",
+      "name": "Exact program name from search results",
+      "agency": "HUD / EPA / DOT / USDA / HHS / DOL / SBA",
+      "description": "What it specifically funds — tied to the neighborhood data above",
+      "amount": "Dollar range or formula if mentioned in search results, else null",
+      "eligibility": "Key eligibility criteria for Montgomery AL specifically",
+      "next_step": "Concrete first action: who to call, which URL to visit, what to file",
       "source_url": "URL from search results"
     }
   ],
   "comparable_cities": [
     {
-      "city": "City, State or Country",
-      "approach": "What they did (from search results)",
-      "lesson": "Key takeaway for Montgomery",
+      "city": "City, State",
+      "problem_match": "What specific problem did they solve — must match the neighborhood data",
+      "approach": "Exactly what they did (from search results)",
+      "outcome": "Measurable result — numbers, percentages, timeline",
+      "lesson": "One-sentence takeaway for Montgomery — specific, not generic",
+      "source_url": "URL from search results"
+    }
+  ],
+  "global_best_practices": [
+    {
+      "city": "City, Country",
+      "practice": "Innovative civic approach — what exactly they did",
+      "outcome": "Measurable result with numbers",
+      "transferable": "How Montgomery could adapt this specifically",
       "source_url": "URL from search results"
     }
   ],
   "montgomery_recommendations": [
-    "Specific actionable step grounded in real Montgomery statistics above",
-    "Step 2",
-    "Step 3"
+    "WHO + WHAT + HOW MUCH + BY WHEN + WHY — example: 'Montgomery Community Development Division should submit a FY2026 CDBG application to Alabama ADECA by November 2025, requesting $750K to rehabilitate 40 of the 207 vacant housing units in West Side — this directly addresses the housing_vacant metric at 207 units and ADI score of 0.562 (worse than 56% of Montgomery neighborhoods).'",
+    "Second concrete recommendation — different program, different department",
+    "Third concrete recommendation — citizen engagement angle grounded in Decidim platform data"
   ],
-  "urgency": "high|medium|low",
-  "estimated_timeline": "X months/years to see impact",
+  "urgency": "critical|high|medium|low",
+  "urgency_rationale": "One sentence citing the specific scores and trends that justify this rating",
+  "estimated_timeline": "X months/years with milestone breakdown",
   "search_grounded": true
 }

@@ -37,3 +37,6 @@ coverage/
 # Temporary
 *.tmp
 *.temp
+.google-service-account.json
+.google-oauth-client.json
+.google-token.json
