@@ -185,6 +185,77 @@ def _resolve_neighborhood(neighborhood: str | None) -> str | None:
     return best if best_score > 0 else neighborhood
 
 
+def _next_steps(tool: str, context: dict = None) -> list[dict]:
+    """
+    Returns 2-3 suggested next tools with plain-language explanations.
+    Injected into key tool outputs so Claude can guide users through the civic workflow.
+    context: optional dict with keys like 'neighborhood', 'severity', 'category', 'proposal_id'
+    """
+    ctx = context or {}
+    nb = ctx.get("neighborhood")
+    nb_arg = f'neighborhood="{nb}"' if nb else 'neighborhood="<zone>"'
+
+    FLOWS = {
+        "detect_civic_gaps": [
+            {"tool": "civic_report",     "why": "Deep-dive into a silent zone — Census trends, incident breakdown, deprivation scores", "example": f'civic_report({nb_arg})'},
+            {"tool": "find_solutions",   "why": "Find federal grant programs and comparable cities that fixed the dominant issue",      "example": f'find_solutions(problem="housing blight", {nb_arg})'},
+            {"tool": "post_ai_response", "why": "Post an AI comment on an existing proposal to bring data into the civic debate",      "example": 'post_ai_response(proposal_id="<id>")'},
+        ],
+        "civic_report": [
+            {"tool": "find_solutions",      "why": "Now that you have the diagnosis, find real federal programs and action plans",          "example": f'find_solutions(problem="<dominant issue>", {nb_arg})'},
+            {"tool": "create_report_doc",   "why": "Export this report as a formatted Google Doc ready to share with city hall",           "example": f'create_report_doc({nb_arg})'},
+            {"tool": "export_to_sheet",     "why": "Push all the numbers into a Google Sheet for data-driven meetings",                    "example": f'export_to_sheet({nb_arg})'},
+            {"tool": "post_ai_response",    "why": "Close the loop — post a data-grounded AI comment directly on a citizen proposal",      "example": 'post_ai_response(proposal_id="<id>")'},
+        ],
+        "find_solutions": [
+            {"tool": "create_report_doc",  "why": "Turn this into a shareable Google Doc — executive briefing for city administrators", "example": f'create_report_doc({nb_arg})'},
+            {"tool": "create_action_tasks","why": "Convert every recommendation into a Google Task assigned to the right department",   "example": f'create_action_tasks({nb_arg})'},
+            {"tool": "post_ai_response",   "why": "Post the top recommendation as an AI comment on the citizen proposal",              "example": 'post_ai_response(proposal_id="<id>")'},
+        ],
+        "get_census_trend": [
+            {"tool": "analyze_neighborhood", "why": "Compute ADI/SVI/EJI deprivation scores to contextualize these trends",  "example": f'analyze_neighborhood({nb_arg})'},
+            {"tool": "get_city_incidents",   "why": "Cross-reference with actual ArcGIS incident data — what's happening on the ground", "example": f'get_city_incidents({nb_arg})'},
+            {"tool": "civic_report",         "why": "Full AI synthesis: trends + incidents + scores + narrative in one shot",            "example": f'civic_report({nb_arg})'},
+        ],
+        "get_city_incidents": [
+            {"tool": "analyze_neighborhood", "why": "Add deprivation scores — is this area already at a breaking point?",  "example": f'analyze_neighborhood({nb_arg})'},
+            {"tool": "civic_report",         "why": "Full AI report combining all data sources for this neighborhood",      "example": f'civic_report({nb_arg})'},
+            {"tool": "find_solutions",       "why": "Find federal programs targeting the dominant incident type",           "example": f'find_solutions(problem="<incident type>", {nb_arg})'},
+        ],
+        "analyze_neighborhood": [
+            {"tool": "civic_report",   "why": "Full AI narrative combining these scores with real Census + ArcGIS data", "example": f'civic_report({nb_arg})'},
+            {"tool": "find_solutions", "why": "Given the severity, what federal programs and city actions apply?",       "example": f'find_solutions(problem="deprivation", {nb_arg})'},
+        ],
+        "summarize_comments": [
+            {"tool": "post_ai_response", "why": "Now that you know the sentiment, post a data-grounded AI response to the proposal",          "example": 'post_ai_response(proposal_id="<id>")'},
+            {"tool": "civic_report",     "why": "Back the debate with real neighborhood data — Census + ArcGIS + deprivation scores",          "example": f'civic_report({nb_arg})'},
+        ],
+        "get_proposals": [
+            {"tool": "classify_proposal",  "why": "Categorize a proposal into one of 10 civic categories + 311 routing",         "example": 'classify_proposal(text="<proposal body>")'},
+            {"tool": "summarize_comments", "why": "Read the room — sentiment analysis on the comments of any proposal",           "example": 'summarize_comments(proposal_id="<id>")'},
+            {"tool": "post_ai_response",   "why": "Let AI respond to a proposal with real neighborhood data",                     "example": 'post_ai_response(proposal_id="<id>")'},
+        ],
+        "export_to_sheet": [
+            {"tool": "create_report_doc", "why": "Complement the sheet with a full narrative Google Doc for city hall", "example": f'create_report_doc({nb_arg})'},
+            {"tool": "sync_gcal",         "why": "Push upcoming public meetings to Google Calendar",                    "example": 'sync_gcal()'},
+        ],
+        "create_report_doc": [
+            {"tool": "export_to_sheet",     "why": "Also push the raw data to Google Sheets for analysis",         "example": f'export_to_sheet({nb_arg})'},
+            {"tool": "create_action_tasks", "why": "Convert recommendations into Google Tasks for departments",     "example": f'create_action_tasks({nb_arg})'},
+        ],
+        "get_meetings": [
+            {"tool": "sync_gcal",        "why": "Sync all these meetings to Google Calendar", "example": 'sync_gcal()'},
+            {"tool": "get_proposals",    "why": "See what citizens are proposing in parallel", "example": 'get_proposals()'},
+        ],
+        "semantic_civic_search": [
+            {"tool": "civic_report",   "why": "Full analysis of the neighborhood most relevant to your search results", "example": f'civic_report({nb_arg})'},
+            {"tool": "find_solutions", "why": "Find real programs targeting the issues surfaced by the search",         "example": 'find_solutions(problem="<topic>")'},
+        ],
+    }
+
+    return FLOWS.get(tool, [])
+
+
 CATEGORIES = {
     "infrastructure":   {"label": "Infrastructure & Roads",           "color": "#3B82F6", "icon": "🏗️",  "311_link": True},
     "environment":      {"label": "Water, Utilities & Environment",   "color": "#22C55E", "icon": "🌿",  "311_link": True},
@@ -243,7 +314,10 @@ async def get_proposals(category: str = None, limit: int = 20) -> str:
                 })
     if len(proposals) > limit:
         proposals = proposals[:limit]
-    return json.dumps(proposals, ensure_ascii=False, indent=2)
+    return json.dumps({
+        "proposals": proposals,
+        "next_steps": _next_steps("get_proposals"),
+    }, ensure_ascii=False, indent=2)
 
 
 # ── TOOL 2 ─────────────────────────────────────────────────────────────────────
@@ -331,7 +405,7 @@ def semantic_civic_search(query: str, neighborhood: str = None) -> str:
         }
         for r in rows
     ]
-    return json.dumps({"query": query, "results": results}, ensure_ascii=False, indent=2)
+    return json.dumps({"query": query, "results": results, "next_steps": _next_steps("semantic_civic_search")}, ensure_ascii=False, indent=2)
 
 
 # ── TOOL 9 — get_census_trend ───────────────────────────────────────────────────
@@ -385,6 +459,7 @@ def get_census_trend(neighborhood: str = None) -> str:
             }
 
     conn.close()
+    result["next_steps"] = _next_steps("get_census_trend", {"neighborhood": nb})
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
@@ -481,6 +556,7 @@ def get_city_incidents(source: str, neighborhood: str = None) -> str:
             }
 
     conn.close()
+    result["next_steps"] = _next_steps("get_city_incidents", {"neighborhood": nb})
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
@@ -534,6 +610,7 @@ def get_business_health(neighborhood: str = None) -> str:
             result["top_categories"] = {r["category"]: r["cnt"] for r in cats}
 
     conn.close()
+    result["next_steps"] = _next_steps("get_business_health", {"neighborhood": nb})
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
@@ -665,7 +742,13 @@ async def find_solutions(problem: str, neighborhood: str = None) -> str:
         local_results=local_res,
     )
 
-    return await _generate_json(prompt, temperature=0.4)
+    raw = await _generate_json(prompt, temperature=0.4)
+    try:
+        parsed = json.loads(raw)
+        parsed["next_steps"] = _next_steps("find_solutions", {"neighborhood": neighborhood})
+        return json.dumps(parsed, ensure_ascii=False, indent=2)
+    except Exception:
+        return raw
 
 
 # ── TOOL 13 — analyze_neighborhood ──────────────────────────────────────────────
@@ -881,6 +964,7 @@ def analyze_neighborhood(neighborhood: str, index: str = "all") -> str:
             }
 
     conn.close()
+    result["next_steps"] = _next_steps("analyze_neighborhood", {"neighborhood": neighborhood if neighborhood != "list" else None})
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
@@ -985,6 +1069,7 @@ async def civic_report(neighborhood: str) -> str:
             "business_source": business.get("data_source", "Yelp"),
             "methodology": "docs/analysis_methodology.md",
         }
+        parsed["next_steps"] = _next_steps("civic_report", {"neighborhood": neighborhood})
         return json.dumps(parsed, ensure_ascii=False, indent=2)
     except json.JSONDecodeError:
         return raw
@@ -1217,6 +1302,7 @@ async def get_meetings(upcoming_only: bool = False) -> str:
         "total": len(meetings),
         "filter": "upcoming only" if upcoming_only else "all",
         "meetings": meetings,
+        "next_steps": _next_steps("get_meetings"),
     }, ensure_ascii=False, indent=2)
 
 
@@ -1302,6 +1388,7 @@ Return JSON with this exact structure:
         result = json.loads(raw)
         result["proposal_id"] = proposal_id
         result["proposal_title"] = title
+        result["next_steps"] = _next_steps("summarize_comments")
         return json.dumps(result, ensure_ascii=False, indent=2)
     except Exception:
         return json.dumps({
@@ -1978,6 +2065,7 @@ async def detect_civic_gaps(top_n: int = 10) -> str:
 
     results.sort(key=lambda x: x["gap_score"], reverse=True)
     top = results[:top_n]
+    worst = top[0]["neighborhood"] if top else None
 
     return json.dumps({
         "silent_zones": top,
@@ -1989,6 +2077,7 @@ async def detect_civic_gaps(top_n: int = 10) -> str:
             "Higher score = more city data problems, fewer citizen voices. "
             "Priority targets for community outreach and proactive city engagement."
         ),
+        "next_steps": _next_steps("detect_civic_gaps", {"neighborhood": worst}),
     }, ensure_ascii=False, indent=2)
 
 
