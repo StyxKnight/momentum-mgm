@@ -54,7 +54,7 @@ LAYER 2 — CIVIC DATA LAKE (real Montgomery open data, PostgreSQL + pgvector)
   civic_data.properties   — Zillow: 500 properties
   civic_data.embeddings   — pgvector (gemini-embedding-001, 3072d): ~61,000 embeddings
 
-LAYER 3 — MCP SERVER (17 tools, Python FastMCP)
+LAYER 3 — MCP SERVER (18 tools, Python FastMCP)
   Connects Claude directly to Decidim + the data lake + Google Workspace.
   Available at: https://mcp.styxcore.dev/mcp
   City administrators query their city in plain language — from any device.
@@ -72,6 +72,7 @@ DETECT     get_census_trend()          14yr OLS regression per metric, R² confi
            get_business_health()       Yelp closure rates, avg rating
 
 UNDERSTAND analyze_neighborhood()     ADI + SVI + EJI composite deprivation scores
+           detect_civic_gaps()        Silent zones — high incidents, zero citizen voice
            semantic_civic_search()    pgvector cosine similarity across all civic data
            summarize_comments()       Sentiment + theme extraction on proposal comments
 
@@ -92,7 +93,7 @@ All real data. No hallucination. Grounded in actual Montgomery statistics.
 
 ---
 
-## MCP Tools (17)
+## MCP Tools (18)
 
 ### Decidim Layer
 | Tool | Description |
@@ -115,6 +116,7 @@ All real data. No hallucination. Grounded in actual Montgomery statistics.
 | Tool | Description |
 |---|---|
 | `analyze_neighborhood` | ADI + SVI + EJI composite deprivation scores, Z-score vs 71 tracts |
+| `detect_civic_gaps` | Silent zones — neighborhoods with high ArcGIS incident load but zero citizen proposals |
 
 ### Report + Solutions Layer
 | Tool | Description |
@@ -139,7 +141,7 @@ The MCP server is live and public. Add it as a connector in Claude (web or mobil
 https://mcp.styxcore.dev/mcp
 ```
 
-No authentication required. All 17 tools immediately available.
+No authentication required. All 18 tools immediately available.
 
 ---
 
@@ -176,7 +178,7 @@ Brazil is building toward this. We shipped it.
 ```
 momentum-mgm/
 ├── mcp-server/
-│   ├── server.py              ← 17 MCP tools
+│   ├── server.py              ← 18 MCP tools
 │   ├── workspace_client.py    ← Google Workspace (Sheets, Docs, Calendar, Drive)
 │   ├── decidim_client.py      ← Decidim GraphQL client (read + write, JWT auth)
 │   ├── authorize_google.py    ← One-time OAuth2 flow
@@ -205,7 +207,7 @@ momentum-mgm/
 | 1 | Mar 5 | Decidim live at mgm.styxcore.dev |
 | 2 | Mar 6 | Data lake: 60K records ArcGIS + Census + Zillow + Yelp + 61K embeddings |
 | 3 | Mar 7 | MCP server 15 tools, civic loop closed, simulated civic society |
-| 4 | Mar 8 | Google Workspace (tools 16-17), MCP HTTP live at mcp.styxcore.dev/mcp, tool audit + neighborhood fuzzy matching |
+| 4 | Mar 8 | Google Workspace, MCP HTTP live at mcp.styxcore.dev/mcp, tool audit, neighborhood fuzzy matching, detect_civic_gaps (tool 18), next_steps guidance in all tools |
 | 5 | Mar 9 | Submission |
 
 ---
