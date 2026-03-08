@@ -8,6 +8,7 @@ import asyncio
 from pathlib import Path
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.server import TransportSecuritySettings
 from openai import AsyncOpenAI
 from decidim_client import graphql
 import psycopg2
@@ -119,7 +120,16 @@ def _linreg(xs: list, ys: list) -> tuple:
 
 SCRAPED_DATA_DIR = Path(__file__).parent.parent / "seeder" / "data" / "scraped"
 
-mcp = FastMCP("momentum-mgm")
+mcp = FastMCP(
+    "momentum-mgm",
+    host="127.0.0.1",
+    port=8200,
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=["mcp.styxcore.dev", "localhost", "127.0.0.1"],
+        allowed_origins=["https://mcp.styxcore.dev", "https://claude.ai"],
+    ),
+)
 openrouter = AsyncOpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=os.getenv("OPENROUTER_API_KEY"),
@@ -1743,4 +1753,8 @@ async def sync_gcal() -> str:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    import sys
+    if "--http" in sys.argv:
+        mcp.run(transport="streamable-http")
+    else:
+        mcp.run()
