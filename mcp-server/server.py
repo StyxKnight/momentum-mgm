@@ -1010,9 +1010,10 @@ async def civic_report(neighborhood: str) -> str:
     business = json.loads(get_business_health(neighborhood))
     scores   = json.loads(analyze_neighborhood(neighborhood, "all"))
 
-    # Zillow housing data
+    # Zillow housing data + survey citizen signals
     conn = get_db()
     housing = {}
+    survey_signals = {}
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("""
             SELECT COUNT(*) as count, AVG(price) as avg_price,
@@ -1031,6 +1032,40 @@ async def civic_report(neighborhood: str) -> str:
                 "max_price": round(row["max_price"]) if row["max_price"] else None,
                 "avg_days_on_market": round(row["avg_dom"]) if row["avg_dom"] else None,
             }
+
+        # Survey aggregate: top citizen-selected answers across all questionnaires
+        cur.execute("""
+            SELECT ro.body->>'en' AS answer,
+                   q.body->>'en'  AS question,
+                   COUNT(*)        AS votes
+            FROM decidim_forms_response_choices rc
+            JOIN decidim_forms_response_options ro ON ro.id = rc.decidim_response_option_id
+            JOIN decidim_forms_questions q ON q.id = ro.decidim_question_id
+            WHERE rc.decidim_response_option_id IS NOT NULL
+              AND ro.body->>'en' IS NOT NULL
+              AND ro.body->>'en' != ''
+            GROUP BY ro.body->>'en', q.body->>'en'
+            ORDER BY votes DESC
+            LIMIT 20
+        """)
+        top_answers = cur.fetchall()
+
+        # Count total survey respondents
+        cur.execute("SELECT COUNT(DISTINCT decidim_user_id) FROM decidim_forms_responses")
+        n_respondents = (cur.fetchone() or {}).get("count", 0)
+
+        # Count total responses (question-level)
+        cur.execute("SELECT COUNT(*) FROM decidim_forms_response_choices WHERE decidim_response_option_id IS NOT NULL")
+        n_choices = (cur.fetchone() or {}).get("count", 0)
+
+        survey_signals = {
+            "total_respondents": n_respondents,
+            "total_choices_recorded": n_choices,
+            "top_citizen_priorities": [
+                {"answer": r["answer"], "question": r["question"], "votes": r["votes"]}
+                for r in top_answers
+            ],
+        }
     conn.close()
 
     # ── Step 2: Build RAG data block ────────────────────────────────────────────
@@ -1054,6 +1089,7 @@ async def civic_report(neighborhood: str) -> str:
             for idx, s in scores.get("scores", {}).items()
             if "score" in s
         },
+        "citizen_survey_signals": survey_signals,
     }
 
     # ── Step 3: Render prompt from Jinja2 template ──────────────────────────────
@@ -1221,9 +1257,10 @@ Write only the comment text."""
         "body": comment_body,
     }, auth=True)
 
-    errors = result.get("errors")
-    if errors:
-        return json.dumps({"error": errors[0]["message"], "proposal_id": proposal_id})
+    errors = result.get("errors") or []
+    real_errors = [e for e in errors if "badge" not in e.get("message", "").lower()]
+    if real_errors:
+        return json.dumps({"error": real_errors[0]["message"], "proposal_id": proposal_id})
 
     comment = ((result.get("data") or {}).get("commentable") or {}).get("addComment") or {}
     return json.dumps({
@@ -2078,6 +2115,188 @@ async def detect_civic_gaps(top_n: int = 10) -> str:
             "Priority targets for community outreach and proactive city engagement."
         ),
         "next_steps": _next_steps("detect_civic_gaps", {"neighborhood": worst}),
+    }, ensure_ascii=False, indent=2)
+
+
+# ── TOOL 21 — post_debate_summary ───────────────────────────────────────────────
+@mcp.tool()
+async def post_debate_summary(debate_id: str) -> str:
+    """
+    WRITE tool — closes the debate loop with a neutral AI synthesis grounded in real city data.
+    Flow:
+      1. Fetch debate title + description + existing citizen comments
+      2. Detect neighborhood/topic → pull real ArcGIS incidents + Census trends
+      3. If comments exist: synthesize pro/contra positions + post neutral AI summary
+         If no comments yet: post an AI "opening brief" seeding both sides with real data
+      4. Post as Momentum AI on the debate thread
+    Tone: neutral facilitator presenting verified facts — no advocacy, no spin.
+    """
+    # ── Step 1: Fetch debate + comments ──────────────────────────────────────────
+    dq = """
+    query {
+      participatoryProcesses {
+        components {
+          ... on Debates {
+            debates(first: 200) {
+              nodes {
+                id
+                title { translation(locale: "en") }
+                description { translation(locale: "en") }
+                comments { id body alignment }
+              }
+            }
+          }
+        }
+      }
+    }"""
+    data = await graphql(dq)
+    debate = None
+    for proc in (data.get("data", {}).get("participatoryProcesses") or []):
+        for comp in (proc.get("components") or []):
+            for node in (comp.get("debates", {}).get("nodes") or []):
+                if str(node["id"]) == str(debate_id):
+                    debate = node
+                    break
+
+    if not debate:
+        return json.dumps({"error": f"Debate {debate_id} not found"})
+
+    title = (debate.get("title") or {}).get("translation", "")
+    description = (debate.get("description") or {}).get("translation", "")
+    import re
+    description_plain = re.sub(r"<[^>]+>", "", description).strip()
+    comments = debate.get("comments") or []
+
+    # ── Step 2: Detect neighborhood from title/description ───────────────────────
+    nb_prompt = f"""From this civic debate topic, extract the Montgomery AL neighborhood or zip code.
+If none is specific, return "Montgomery".
+Debate: "{title}. {description_plain[:300]}"
+Return JSON: {{"neighborhood": "name"}}"""
+    nb_raw = await _generate_json(nb_prompt, temperature=0.0)
+    try:
+        detected_nb = json.loads(nb_raw).get("neighborhood") or "Montgomery"
+    except Exception:
+        detected_nb = "Montgomery"
+
+    # ── Step 3: Pull real data ────────────────────────────────────────────────────
+    report_raw = await civic_report(detected_nb)
+    report = json.loads(report_raw)
+    severity = report.get("overall_severity", "moderate")
+    findings = report.get("findings", [])
+    scores = report.get("deprivation_scores", {}) or {}
+    adi_score = (scores.get("ADI") or {}).get("score")
+
+    top_finding = ""
+    if findings:
+        f0 = findings[0]
+        top_finding = f0.get("finding", "") if isinstance(f0, dict) else str(f0)
+
+    second_finding = ""
+    if len(findings) > 1:
+        f1 = findings[1]
+        second_finding = f1.get("finding", "") if isinstance(f1, dict) else str(f1)
+
+    # ── Step 4: Build prompt based on whether comments exist ─────────────────────
+    n_comments = len(comments)
+
+    if n_comments == 0:
+        # Opening brief — seed both sides with real data
+        comment_prompt = f"""You are Momentum AI, the civic intelligence system for Montgomery, Alabama.
+You are opening a public debate forum thread. Your role: neutral facilitator who presents verified city data — no advocacy.
+
+DEBATE TOPIC: "{title}"
+CONTEXT: {description_plain[:400]}
+NEIGHBORHOOD ANALYZED: {detected_nb}
+
+REAL CITY DATA:
+- Overall severity level: {severity}
+- Key finding 1: {top_finding}
+- Key finding 2: {second_finding}
+- ADI deprivation score: {f"{round(adi_score * 100)}th percentile" if adi_score else "not available"} (higher = more deprived)
+
+Write a 4-6 sentence opening brief that:
+1. States what the city data shows (1-2 facts, specific numbers)
+2. Identifies the main tension in this debate (who benefits, who bears the cost)
+3. Invites citizens to share their perspective
+Do NOT take a side. Use plain English. No bullet points. No markdown.
+End with: "— Momentum AI, City of Montgomery"
+
+Write only the comment text."""
+    else:
+        # Synthesis — summarize what citizens said, then add data layer
+        pro_comments = [c.get("body", "") for c in comments if c.get("alignment", 0) == 1]
+        con_comments = [c.get("body", "") for c in comments if c.get("alignment", 0) == -1]
+        neutral_comments = [c.get("body", "") for c in comments if c.get("alignment", 0) == 0]
+
+        def fmt_comments(lst, max_each=200):
+            return " | ".join(str(c)[:max_each] for c in lst[:5]) or "none"
+
+        comment_prompt = f"""You are Momentum AI, the civic intelligence system for Montgomery, Alabama.
+You are posting a neutral synthesis of a public debate thread. Your role: summarize citizen positions fairly, then add verified city data.
+
+DEBATE TOPIC: "{title}"
+NEIGHBORHOOD: {detected_nb}
+
+CITIZEN COMMENTS ({n_comments} total):
+- Supporting ({len(pro_comments)}): {fmt_comments(pro_comments)}
+- Opposing ({len(con_comments)}): {fmt_comments(con_comments)}
+- Neutral/mixed ({len(neutral_comments)}): {fmt_comments(neutral_comments)}
+
+REAL CITY DATA:
+- Overall severity: {severity}
+- Key finding: {top_finding}
+- ADI deprivation score: {f"{round(adi_score * 100)}th percentile" if adi_score else "not available"}
+
+Write a 4-6 sentence synthesis that:
+1. Fairly represents both sides ("Some residents argue... Others point out...")
+2. Adds 1-2 facts from city data that inform the debate (specific numbers)
+3. Identifies where data and community sentiment align or diverge
+No advocacy. No bullet points. No markdown. Plain English.
+End with: "— Momentum AI, City of Montgomery"
+
+Write only the comment text."""
+
+    comment_body = await _generate_json(comment_prompt, temperature=0.2)
+    try:
+        parsed = json.loads(comment_body)
+        comment_body = parsed.get("comment", comment_body) if isinstance(parsed, dict) else comment_body
+    except Exception:
+        pass
+    comment_body = comment_body.strip().strip('"')
+
+    # ── Step 5: Post via GraphQL ──────────────────────────────────────────────────
+    mutation = """
+    mutation($id: String!, $type: String!, $body: String!) {
+      commentable(id: $id, type: $type) {
+        addComment(body: $body) { id body }
+      }
+    }"""
+    result = await graphql(mutation, {
+        "id": str(debate_id),
+        "type": "Decidim::Debates::Debate",
+        "body": comment_body,
+    }, auth=True)
+
+    errors = result.get("errors") or []
+    # Decidim gamification badge error fires after comment is already created — ignore it
+    real_errors = [e for e in errors if "badge" not in e.get("message", "").lower()]
+    if real_errors:
+        return json.dumps({"error": real_errors[0]["message"], "debate_id": debate_id})
+
+    comment = ((result.get("data") or {}).get("commentable") or {}).get("addComment") or {}
+    mode = "synthesis" if n_comments > 0 else "opening_brief"
+
+    return json.dumps({
+        "status": "posted",
+        "debate_id": debate_id,
+        "debate_title": title,
+        "mode": mode,
+        "neighborhood_analyzed": detected_nb,
+        "severity": severity,
+        "citizen_comments_read": n_comments,
+        "comment_id": comment.get("id"),
+        "comment_preview": comment_body[:300],
+        "platform_url": f"{os.getenv('DECIDIM_URL')}/processes",
     }, ensure_ascii=False, indent=2)
 
 

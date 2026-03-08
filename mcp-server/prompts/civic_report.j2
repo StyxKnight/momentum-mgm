@@ -10,9 +10,11 @@ Before writing findings, reason through the data step by step:
 2. Cross-reference: do declining income + high violations + high poverty form a compounding pattern?
 3. Check business health: closed rate > 20% signals economic stress.
 4. Read deprivation scores: which index is highest? What are the top 3 driving factors?
-5. Identify 3 to 5 distinct factual findings. Each must cite a specific number from DATA.
+5. Read citizen_survey_signals: what do residents say are their top priorities? Note alignment or divergence vs. ArcGIS data.
+6. Identify 3 to 5 distinct factual findings. Each must cite a specific number from DATA.
    When writing counts of people or buildings in narrative text, round to nearest integer (Census ACS weighted estimates — 207.6 → 208 people). Keep raw decimals for rates, percentages, and dollar amounts.
-6. Assign overall severity using quartile thresholds (ADI/SVI standard):
+   At least one finding must reference citizen survey data (e.g. "X of Y survey respondents prioritized...") if survey_signals has respondents > 0.
+7. Assign overall severity using quartile thresholds (ADI/SVI standard):
    critical = score > 0.75 on 2+ indices (top quartile, worse than 75% of Montgomery neighborhoods)
    high     = score 0.50–0.75 on 2+ indices (above median)
    moderate = score 0.25–0.50
