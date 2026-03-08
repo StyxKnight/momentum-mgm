@@ -1837,6 +1837,161 @@ async def create_action_tasks(neighborhood: str) -> str:
     }, ensure_ascii=False, indent=2)
 
 
+@mcp.tool()
+async def detect_civic_gaps(top_n: int = 10) -> str:
+    """
+    Identify Montgomery neighborhoods with high incident load but few or zero citizen proposals —
+    the "silent zones" where problems are measurable in city data but residents aren't speaking up.
+
+    Algorithm:
+      1. Count ArcGIS incidents per neighborhood (all 19 sources, civic_data.city_data)
+      2. Fetch all Decidim proposals and count how many mention each neighborhood by name
+      3. Compute gap_score = incident_load_index / max(1, proposal_count)
+         where incident_load_index = neighborhood_incidents / avg_incidents_across_all_neighborhoods
+      4. Rank by gap_score descending — highest score = most critical silent zone
+
+    Returns top_n neighborhoods ranked by gap_score with:
+      - total_incidents (count + breakdown by source)
+      - proposal_count (how many Decidim proposals mention this neighborhood)
+      - gap_score (normalized urgency metric)
+      - top_sources (top 3 incident types driving the score)
+      - recommended_action (the category to target for outreach)
+
+    No AI call — pure SQL + Decidim GraphQL. Instant results.
+    """
+    conn = get_db()
+
+    # ── 1. ArcGIS incident counts per neighborhood ───────────────────────────
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT neighborhood, source, COUNT(*) as cnt
+            FROM civic_data.city_data
+            WHERE neighborhood IS NOT NULL AND neighborhood != ''
+            GROUP BY neighborhood, source
+            ORDER BY neighborhood, cnt DESC
+        """)
+        rows = cur.fetchall()
+    conn.close()
+
+    # Aggregate by neighborhood
+    nb_incidents: dict[str, dict] = {}
+    for nb, source, cnt in rows:
+        if nb not in nb_incidents:
+            nb_incidents[nb] = {"total": 0, "by_source": {}}
+        nb_incidents[nb]["total"] += cnt
+        nb_incidents[nb]["by_source"][source] = cnt
+
+    if not nb_incidents:
+        return json.dumps({"error": "No city_data found."})
+
+    avg_incidents = sum(d["total"] for d in nb_incidents.values()) / len(nb_incidents)
+
+    # ── 2. Decidim proposals — count mentions of each neighborhood ────────────
+    query = """
+    query {
+      participatoryProcesses {
+        components {
+          ... on Proposals {
+            proposals(first: 500) {
+              nodes {
+                title { translation(locale: "en") }
+                body  { translation(locale: "en") }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    try:
+        data = await graphql(query)
+        all_texts: list[str] = []
+        for proc in (data.get("data", {}).get("participatoryProcesses") or []):
+            for comp in (proc.get("components") or []):
+                for p in ((comp.get("proposals") or {}).get("nodes") or []):
+                    title = (p.get("title") or {}).get("translation", "")
+                    body  = (p.get("body")  or {}).get("translation", "")
+                    all_texts.append(f"{title} {body}".lower())
+    except Exception:
+        all_texts = []
+
+    # Count proposal mentions per neighborhood (case-insensitive substring match)
+    nb_proposal_count: dict[str, int] = {}
+    for nb in nb_incidents:
+        nb_lower = nb.lower()
+        # Also match abbreviated forms (e.g. "West Side" matches "westside", "west side")
+        nb_tokens = nb_lower.replace("/", " ").split()
+        count = 0
+        for text in all_texts:
+            # Direct match
+            if nb_lower in text:
+                count += 1
+            # All key tokens match (for compound names like "East Montgomery / Eastdale")
+            elif len(nb_tokens) >= 2 and all(tok in text for tok in nb_tokens if len(tok) > 3):
+                count += 1
+        nb_proposal_count[nb] = count
+
+    # ── 3. Compute gap scores ─────────────────────────────────────────────────
+    SOURCE_TO_CATEGORY = {
+        "fire_incidents":         "public_safety",
+        "code_violations":        "blight",
+        "building_permits":       "infrastructure",
+        "housing_condition":      "housing",
+        "food_safety":            "health",
+        "environmental_nuisance": "environment",
+        "transit_stops":          "transportation",
+        "education_facilities":   "education",
+        "education_facility":     "education",
+        "business_licenses":      "economy",
+        "parks_recreation":       "recreation",
+        "community_centers":      "services",
+        "infrastructure_projects":"infrastructure",
+        "opportunity_zones":      "economy",
+        "behavioral_centers":     "health",
+        "citizen_reports":        "services",
+        "city_owned_property":    "infrastructure",
+        "historic_markers":       "culture",
+        "zoning_decisions":       "planning",
+    }
+
+    results = []
+    for nb, data in nb_incidents.items():
+        total = data["total"]
+        load_index = total / avg_incidents  # >1 means above average incident load
+        proposals = nb_proposal_count.get(nb, 0)
+        gap_score = round(load_index / max(1, proposals), 4)
+
+        top_sources = sorted(data["by_source"].items(), key=lambda x: x[1], reverse=True)[:3]
+        dominant_source = top_sources[0][0] if top_sources else "code_violations"
+        recommended_category = SOURCE_TO_CATEGORY.get(dominant_source, "services")
+
+        results.append({
+            "neighborhood": nb,
+            "gap_score": gap_score,
+            "total_incidents": total,
+            "incident_load_index": round(load_index, 2),
+            "proposal_count": proposals,
+            "top_sources": [{"source": s, "count": c} for s, c in top_sources],
+            "dominant_issue": dominant_source.replace("_", " ").title(),
+            "recommended_outreach_category": recommended_category,
+        })
+
+    results.sort(key=lambda x: x["gap_score"], reverse=True)
+    top = results[:top_n]
+
+    return json.dumps({
+        "silent_zones": top,
+        "total_neighborhoods_analyzed": len(results),
+        "avg_incidents_per_neighborhood": round(avg_incidents, 0),
+        "total_proposals_on_platform": len(all_texts),
+        "methodology": (
+            "gap_score = (neighborhood_incidents / avg_incidents) / max(1, proposals_mentioning_neighborhood). "
+            "Higher score = more city data problems, fewer citizen voices. "
+            "Priority targets for community outreach and proactive city engagement."
+        ),
+    }, ensure_ascii=False, indent=2)
+
+
 if __name__ == "__main__":
     import sys
     if "--http" in sys.argv:
