@@ -1,4 +1,4 @@
-"""Google Workspace client — Sheets, Docs, Calendar, Drive."""
+"""Google Workspace client — Sheets, Docs, Calendar, Drive, Slides, Tasks."""
 import os
 from pathlib import Path
 from google.oauth2.credentials import Credentials
@@ -26,6 +26,12 @@ def get_calendar_service():
 
 def get_drive_service():
     return build('drive', 'v3', credentials=_creds())
+
+def get_slides_service():
+    return build('slides', 'v1', credentials=_creds())
+
+def get_tasks_service():
+    return build('tasks', 'v1', credentials=_creds())
 
 
 def create_or_get_sheet(title: str) -> tuple:
@@ -139,6 +145,91 @@ def create_calendar_event(cal_id: str, event: dict) -> str:
         return 'skipped'
     result = cal.events().insert(calendarId=cal_id, body=event).execute()
     return result['id']
+
+
+def create_slides(title: str, slides_data: list) -> tuple:
+    """Create a Google Slides presentation.
+    slides_data = list of dicts: {title, body (list of str), notes (optional str)}
+    Returns (presentation_id, url)."""
+    svc = get_slides_service()
+    prs = svc.presentations().create(body={'title': title}).execute()
+    pid = prs['presentationId']
+    first_slide_id = prs['slides'][0]['objectId']
+
+    # Step 1: create all slides (TITLE_AND_BODY layout)
+    create_requests = []
+    new_slide_ids = []
+    for i, _ in enumerate(slides_data):
+        sid = f"momentum_slide_{i}"
+        new_slide_ids.append(sid)
+        create_requests.append({'createSlide': {
+            'insertionIndex': i,
+            'objectId': sid,
+            'slideLayoutReference': {'predefinedLayout': 'TITLE_AND_BODY'},
+        }})
+    # Delete the original blank slide last
+    create_requests.append({'deleteObject': {'objectId': first_slide_id}})
+    svc.presentations().batchUpdate(presentationId=pid, body={'requests': create_requests}).execute()
+
+    # Step 2: read back to get actual placeholder object IDs
+    prs = svc.presentations().get(presentationId=pid).execute()
+    slide_map = {s['objectId']: s for s in prs['slides']}
+
+    # Step 3: insert text into placeholders
+    text_requests = []
+    for i, (sid, slide_data) in enumerate(zip(new_slide_ids, slides_data)):
+        slide = slide_map.get(sid, {})
+        elements = slide.get('pageElements', [])
+        title_id = None
+        body_id = None
+        for el in elements:
+            ph = el.get('shape', {}).get('placeholder', {})
+            ptype = ph.get('type', '')
+            if ptype in ('TITLE', 'CENTERED_TITLE'):
+                title_id = el['objectId']
+            elif ptype in ('BODY', 'SUBTITLE'):
+                body_id = el['objectId']
+
+        if title_id:
+            text_requests.append({'insertText': {
+                'objectId': title_id,
+                'text': slide_data.get('title', ''),
+                'insertionIndex': 0,
+            }})
+        if body_id:
+            body_text = '\n'.join(slide_data.get('body', []))
+            text_requests.append({'insertText': {
+                'objectId': body_id,
+                'text': body_text,
+                'insertionIndex': 0,
+            }})
+
+    if text_requests:
+        svc.presentations().batchUpdate(presentationId=pid, body={'requests': text_requests}).execute()
+
+    _share_with_admin(pid)
+    url = f"https://docs.google.com/presentation/d/{pid}/edit"
+    return pid, url
+
+
+def create_task_list(list_title: str, tasks: list) -> tuple:
+    """Create a Google Tasks list with tasks.
+    tasks = list of dicts: {title, notes (optional), due (optional ISO date)}
+    Returns (list_id, url)."""
+    svc = get_tasks_service()
+    task_list = svc.tasklists().insert(body={'title': list_title}).execute()
+    list_id = task_list['id']
+
+    for task in tasks:
+        body = {'title': task['title']}
+        if task.get('notes'):
+            body['notes'] = task['notes']
+        if task.get('due'):
+            body['due'] = task['due']
+        svc.tasks().insert(tasklist=list_id, body=body).execute()
+
+    url = f"https://tasks.google.com/tasks/search?q={list_title.replace(' ', '+')}"
+    return list_id, url
 
 
 def create_calendar(name: str) -> tuple:
