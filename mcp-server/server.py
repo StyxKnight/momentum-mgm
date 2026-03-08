@@ -129,7 +129,7 @@ def _linreg(xs: list, ys: list) -> tuple:
 
 mcp = FastMCP(
     "momentum-mgm",
-    host="127.0.0.1",
+    host="0.0.0.0",
     port=8200,
     transport_security=TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
@@ -141,6 +141,49 @@ openrouter = AsyncOpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=os.getenv("OPENROUTER_API_KEY"),
 )
+
+VALID_NEIGHBORHOODS = [
+    "Centennial Hill", "Downtown Montgomery", "West Side", "South Montgomery",
+    "South Montgomery / Eastchase", "Southeast Montgomery", "Midtown / Cloverdale",
+    "Cottage Hill", "North Montgomery / Chisholm", "East Montgomery / Eastdale",
+    "East Montgomery / Vaughn", "East Montgomery / Forest Park",
+    "Northwest Montgomery County", "Rural Montgomery County", "Pike Road",
+    "Garden District", "Cloverdale",
+]
+
+_NB_HINT = (
+    "Valid neighborhoods: Centennial Hill, Downtown Montgomery, West Side, "
+    "South Montgomery, South Montgomery / Eastchase, Southeast Montgomery, "
+    "Midtown / Cloverdale, Cottage Hill, North Montgomery / Chisholm, "
+    "East Montgomery / Eastdale, East Montgomery / Vaughn, "
+    "East Montgomery / Forest Park, Garden District, Cloverdale. "
+    "Use None for city-wide. Do NOT use sub-neighborhood names like "
+    "'Capitol Heights' or 'Cloverdale Park' — use the closest zone above."
+)
+
+
+def _resolve_neighborhood(neighborhood: str | None) -> str | None:
+    """Fuzzy-match neighborhood name to closest valid name. Returns None if city-wide."""
+    if not neighborhood or neighborhood.lower() in ("montgomery", "all", "city-wide"):
+        return None
+    nb_lower = neighborhood.lower()
+    # Exact match
+    for valid in VALID_NEIGHBORHOODS:
+        if nb_lower == valid.lower():
+            return valid
+    # Partial match
+    for valid in VALID_NEIGHBORHOODS:
+        if nb_lower in valid.lower() or valid.lower() in nb_lower:
+            return valid
+    # Word overlap
+    words = set(nb_lower.split())
+    best, best_score = None, 0
+    for valid in VALID_NEIGHBORHOODS:
+        score = len(words & set(valid.lower().split()))
+        if score > best_score:
+            best, best_score = valid, score
+    return best if best_score > 0 else neighborhood
+
 
 CATEGORIES = {
     "infrastructure":   {"label": "Infrastructure & Roads",           "color": "#3B82F6", "icon": "🏗️",  "311_link": True},
@@ -303,7 +346,7 @@ def get_census_trend(neighborhood: str = None) -> str:
     neighborhood=None returns city-wide aggregate across all 71 tracts.
     """
     conn = get_db()
-    nb = neighborhood
+    nb = _resolve_neighborhood(neighborhood)
     metrics = ["median_income", "poverty_below", "housing_vacant", "unemployed", "median_rent"]
     result = {
         "neighborhood": nb or "Montgomery (city-wide)",
@@ -395,7 +438,7 @@ def get_city_incidents(source: str, neighborhood: str = None) -> str:
         conn.close()
         return json.dumps({"error": f"Unknown source '{source}'. Use source='list' to see valid options."})
 
-    nb = neighborhood
+    nb = _resolve_neighborhood(neighborhood)
     result = {
         "neighborhood": nb or "Montgomery (city-wide)",
         "source": source,
@@ -452,7 +495,7 @@ def get_business_health(neighborhood: str = None) -> str:
     neighborhood=None returns city-wide totals.
     """
     conn = get_db()
-    nb = neighborhood
+    nb = _resolve_neighborhood(neighborhood)
     result = {
         "neighborhood": nb or "Montgomery (city-wide)",
         "data_source": "Yelp via Bright Data (500 businesses sampled, Montgomery AL)",
@@ -503,7 +546,10 @@ async def find_solutions(problem: str, neighborhood: str = None) -> str:
     from cities that solved similar issues, and Montgomery-specific opportunities.
     Uses Brave Search API for live results + real Census data for Montgomery context.
     Examples: 'high vacancy rate', 'youth unemployment', 'food deserts', 'housing blight'
+    ⚠ LATENCY: 30-60 seconds (parallel Brave searches + Gemini). Do NOT retry.
+    AI: Gemini 2.5 Flash primary, Grok-4 via OpenRouter fallback. Temperature: 0.4.
     """
+    neighborhood = _resolve_neighborhood(neighborhood)
     import asyncio
 
     # ── Real Montgomery stats: Census trends + incidents + deprivation scores ───
@@ -642,6 +688,8 @@ def analyze_neighborhood(neighborhood: str, index: str = "all") -> str:
     """
     import statistics
 
+    if neighborhood != "list":
+        neighborhood = _resolve_neighborhood(neighborhood) or neighborhood
     VALID_INDICES = ["ADI", "SVI", "EJI", "all"]
     if index not in VALID_INDICES:
         return json.dumps({"error": f"Unknown index '{index}'. Use: ADI, SVI, EJI, or all"})
@@ -841,17 +889,27 @@ def analyze_neighborhood(neighborhood: str, index: str = "all") -> str:
 async def civic_report(neighborhood: str) -> str:
     """
     ANALYZE tool — full civic intelligence report for a Montgomery neighborhood.
-    Aggregates all research tools (Census trend, ArcGIS incidents, Yelp health, ADI/SVI/EJI scores),
-    then calls Grok-4 with structured prompt (Role + Lorebook + RAG + CoT + Restrictions + JSON schema)
-    to produce a factual, hallucination-resistant civic analysis.
+    VALID NEIGHBORHOOD NAMES (use exactly): "Centennial Hill", "Downtown Montgomery",
+    "West Side", "South Montgomery", "Southeast Montgomery", "Midtown / Cloverdale",
+    "Cottage Hill", "North Montgomery / Chisholm", "East Montgomery / Eastdale",
+    "East Montgomery / Vaughn", "East Montgomery / Forest Park",
+    "Northwest Montgomery County", "Rural Montgomery County", "Pike Road".
+    For city-wide analysis use neighborhood=None or "Montgomery".
+    Do NOT use sub-neighborhood names (e.g. "Capitol Heights") — map to closest zone.
+    Aggregates Census trend, 19 ArcGIS sources, Zillow, Yelp, ADI/SVI/EJI scores,
+    then calls Gemini 2.5 Flash to produce a factual, hallucination-resistant civic analysis.
 
-    Temperature: 0.1 (data analysis mode)
-    Output: structured JSON with findings, severity, trends, and top civic concerns.
-    All numbers in the output are verified against real data — no inference allowed.
+    ⚠ LATENCY: This tool takes 20-40 seconds. Do NOT retry — wait for the response.
+    AI: Gemini 2.5 Flash primary, Grok-4 via OpenRouter fallback. Temperature: 0.1.
+    Scores: ADI (material deprivation, UW Madison/HRSA), SVI (social vulnerability, CDC/ATSDR),
+    EJI (environmental burden, EPA). All 0.0-1.0, higher = worse, percentile vs 71 Montgomery tracts.
+    Output: structured JSON with overall_severity, findings[], strongest_signal, data_confidence.
+    All numbers verified against real data — no inference allowed.
 
     Use this before find_solutions() to ground solution recommendations in confirmed facts.
     """
-    # ── Step 1: Collect all research data ───────────────────────────────────────
+    # ── Step 1: Resolve neighborhood name + collect all research data ────────────
+    neighborhood = _resolve_neighborhood(neighborhood) or "Montgomery"
     census   = json.loads(get_census_trend(neighborhood))
     incidents_list = []
     for source in ["code_violations", "building_permits", "fire_incidents",
