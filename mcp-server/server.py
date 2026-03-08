@@ -1,6 +1,14 @@
 """
 Momentum MGM — MCP Server
-Bridges Claude Desktop ↔ Decidim civic platform
+Bridges Claude ↔ Decidim civic platform + Montgomery open data lake
+
+ARCHITECTURE NOTE:
+- Seeded citizens (20 characters via inject_decidim.rb) are SIMULATION ONLY.
+  In real deployment they are purged — replaced by actual Montgomery residents.
+- AI tools (post_ai_response, detect_civic_gaps, etc.) remain active in all modes.
+  The AI never impersonates a citizen. It always signs as "Momentum AI".
+- All AI comments are data-grounded: Census ACS + ArcGIS + Yelp + Zillow.
+  No hallucinations. No generic advice.
 """
 import os
 import json
@@ -118,7 +126,6 @@ def _linreg(xs: list, ys: list) -> tuple:
     r2 = 1 - ss_res / ss_tot if ss_tot else 1.0
     return slope, intercept, r2
 
-SCRAPED_DATA_DIR = Path(__file__).parent.parent / "seeder" / "data" / "scraped"
 
 mcp = FastMCP(
     "momentum-mgm",
@@ -236,266 +243,10 @@ Respond in JSON only:
     return await _generate_json(prompt)
 
 
-# ── TOOL 3 ─────────────────────────────────────────────────────────────────────
-@mcp.tool()
-async def analyze_trends() -> str:
-    """
-    Analyze current proposal trends on the platform.
-    Returns total counts, top topics, most voted proposals, and priority alignment.
-    """
-    query = """
-    query {
-      participatoryProcesses {
-        components {
-          ... on Proposals {
-            proposals(first: 200) {
-              nodes {
-                id
-                title { translation(locale: "en") }
-              }
-            }
-          }
-        }
-      }
-    }
-    """
-    data = await graphql(query)
-    proposals = []
-    for proc in (data.get("data", {}).get("participatoryProcesses") or []):
-        for comp in (proc.get("components") or []):
-            nodes = (comp.get("proposals") or {}).get("nodes") or []
-            for p in nodes:
-                title = (p.get("title") or {}).get("translation", "")
-                proposals.append({"id": p["id"], "title": title})
-
-    result = {
-        "total_proposals": len(proposals),
-        "top_proposals": proposals[:10],
-    }
-    return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-# ── TOOL 4 ─────────────────────────────────────────────────────────────────────
-@mcp.tool()
-async def recommend_action(topic: str) -> str:
-    """
-    Generate a concrete action recommendation for city administration on a given civic topic.
-    Cross-references with Mayor Reed's priorities and Montgomery's available programs.
-    Example topic: 'street lighting in West Montgomery', 'blight on Southern Blvd'
-    """
-    prompt = f"""You are advising the city administration of Montgomery, Alabama.
-
-Topic raised by citizens on the Momentum MGM civic platform: "{topic}"
-
-Montgomery has a 311 system for reactive service requests. Momentum MGM captures proactive civic proposals.
-Your role: advise how city hall should respond, and whether this should also generate a 311 action.
-
-Provide a concrete action recommendation in JSON:
-{{
-  "urgency": "high|medium|low",
-  "department": "Which city department to involve",
-  "recommended_action": "Specific, actionable step for city administration",
-  "generates_311": true,
-  "311_service_type": "What type of 311 request to open, or null if not applicable",
-  "civic_response": "How to respond to citizens on the platform",
-  "next_steps": ["step1", "step2", "step3"]
-}}"""
-
-    return await _generate_json(prompt)
 
 
-# ── TOOL 5 ─────────────────────────────────────────────────────────────────────
-@mcp.tool()
-async def get_platform_summary() -> str:
-    """
-    Get a full summary of the Momentum MGM platform state.
-    Total proposals, participation stats, and what Montgomery is talking about right now.
-    """
-    trends = json.loads(await analyze_trends())
-    summary = {
-        "platform": "Momentum MGM — Montgomery Civic Participation",
-        "total_proposals": trends["total_proposals"],
-        "top_issues": trends["top_by_votes"],
-        "categories": list(CATEGORIES.keys()),
-        "categories_detail": {k: {"label": v["label"], "color": v["color"]} for k, v in CATEGORIES.items()},
-    }
-    return json.dumps(summary, ensure_ascii=False, indent=2)
-
-
-# ── TOOL 6 ─────────────────────────────────────────────────────────────────────
-@mcp.tool()
-async def get_montgomery_context(topic: str) -> str:
-    """
-    Query real Montgomery civic data for context on any topic.
-    Sources: city news, mayor priorities, 311 data, category searches.
-    Example: topic='public safety', topic='housing blight', topic='Mayor Reed 2026'
-    Returns relevant excerpts from scraped Montgomery sources.
-    """
-    topic_lower = topic.lower()
-    results = []
-
-    # Load all scraped data files
-    files = {
-        "mayor_priorities": SCRAPED_DATA_DIR / "mayor_priorities.json",
-        "category_searches": SCRAPED_DATA_DIR / "category_searches.json",
-        "city_pages": SCRAPED_DATA_DIR / "city_pages.json",
-        "311_data": SCRAPED_DATA_DIR / "311_data.json",
-    }
-
-    for source_name, fpath in files.items():
-        if not fpath.exists():
-            continue
-        with open(fpath) as f:
-            data = json.load(f)
-
-        # Search results — match by title/description keywords
-        if source_name == "category_searches":
-            for category, items in data.items():
-                if any(w in topic_lower for w in category.split("_")):
-                    for r in items[:3]:
-                        results.append({
-                            "source": f"Montgomery civic data ({category})",
-                            "title": r.get("title", ""),
-                            "excerpt": r.get("description", "")[:300],
-                            "url": r.get("url", ""),
-                        })
-
-        elif source_name == "mayor_priorities":
-            for r in data.get("search_results", []):
-                text = (r.get("title", "") + " " + r.get("description", "")).lower()
-                if any(w in text for w in topic_lower.split()):
-                    results.append({
-                        "source": "Mayor Reed statements",
-                        "title": r.get("title", ""),
-                        "excerpt": r.get("description", "")[:300],
-                        "url": r.get("url", ""),
-                    })
-
-        elif source_name == "city_pages":
-            for page_key, page_data in data.items():
-                content = page_data.get("content", "").lower()
-                if any(w in content for w in topic_lower.split()):
-                    excerpt = page_data.get("content", "")[:400]
-                    results.append({
-                        "source": f"City of Montgomery — {page_data.get('description', page_key)}",
-                        "title": page_data.get("description", page_key),
-                        "excerpt": excerpt,
-                        "url": page_data.get("url", ""),
-                    })
-
-    if not results:
-        return json.dumps({
-            "topic": topic,
-            "results": [],
-            "note": "No direct matches in scraped data. Run scrape.py to refresh."
-        }, indent=2)
-
-    return json.dumps({
-        "topic": topic,
-        "results": results[:6],  # top 6 most relevant
-        "sources_searched": list(files.keys()),
-    }, ensure_ascii=False, indent=2)
-
-
-# ── TOOL 7 ─────────────────────────────────────────────────────────────────────
-@mcp.tool()
-def get_neighborhood_intelligence(neighborhood: str) -> str:
-    """
-    Comprehensive intelligence report for a Montgomery neighborhood.
-    Aggregates Census ACS trends, Zillow housing prices, Yelp business health,
-    and Indeed job market data into a single structured report.
-    Use neighborhood='all' for city-wide summary.
-    """
-    conn = get_db()
-    report = {"neighborhood": neighborhood, "sources": {}}
-
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        # Census: latest year metrics
-        tract_filter = "" if neighborhood == "all" else "AND neighborhood ILIKE %s"
-        params_n = (f"%{neighborhood}%",) if neighborhood != "all" else ()
-
-        cur.execute(f"""
-            SELECT metric, AVG(value) as value, MAX(year) as year
-            FROM civic_data.census
-            WHERE year = (SELECT MAX(year) FROM civic_data.census)
-            {tract_filter}
-            GROUP BY metric
-        """, params_n)
-        census_latest = {r["metric"]: round(r["value"], 1) for r in cur.fetchall()}
-        report["sources"]["census_latest"] = census_latest
-
-        # Census: income trend 2012→now
-        cur.execute(f"""
-            SELECT year, AVG(value) as value
-            FROM civic_data.census
-            WHERE metric = 'median_income' {tract_filter}
-            GROUP BY year ORDER BY year
-        """, params_n)
-        income_rows = cur.fetchall()
-        if income_rows:
-            report["sources"]["income_trend"] = {
-                "2012": round(income_rows[0]["value"]),
-                "latest": round(income_rows[-1]["value"]),
-                "change_pct": round((income_rows[-1]["value"] - income_rows[0]["value"]) / income_rows[0]["value"] * 100, 1),
-            }
-
-        # Zillow: housing prices
-        cur.execute("""
-            SELECT COUNT(*) as count, AVG(price) as avg_price,
-                   MIN(price) as min_price, MAX(price) as max_price,
-                   AVG(days_on_market) as avg_dom
-            FROM civic_data.properties
-            WHERE source = 'zillow' AND price > 0
-            AND (%s OR neighborhood ILIKE %s)
-        """, (neighborhood == "all", f"%{neighborhood}%"))
-        zillow = cur.fetchone()
-        if zillow and zillow["count"]:
-            report["sources"]["housing"] = {
-                "listings": zillow["count"],
-                "avg_price": round(zillow["avg_price"]) if zillow["avg_price"] else None,
-                "min_price": round(zillow["min_price"]) if zillow["min_price"] else None,
-                "max_price": round(zillow["max_price"]) if zillow["max_price"] else None,
-                "avg_days_on_market": round(zillow["avg_dom"]) if zillow["avg_dom"] else None,
-            }
-
-        # Yelp: business health
-        cur.execute("""
-            SELECT COUNT(*) as total,
-                   SUM(CASE WHEN is_closed THEN 1 ELSE 0 END) as closed,
-                   AVG(rating) as avg_rating,
-                   AVG(review_count) as avg_reviews
-            FROM civic_data.businesses
-            WHERE source = 'yelp'
-            AND (%s OR neighborhood ILIKE %s)
-        """, (neighborhood == "all", f"%{neighborhood}%"))
-        yelp = cur.fetchone()
-        if yelp and yelp["total"]:
-            report["sources"]["businesses"] = {
-                "total": yelp["total"],
-                "closed": yelp["closed"],
-                "closure_rate_pct": round(yelp["closed"] / yelp["total"] * 100, 1),
-                "avg_rating": round(yelp["avg_rating"], 2) if yelp["avg_rating"] else None,
-                "avg_reviews": round(yelp["avg_reviews"]) if yelp["avg_reviews"] else None,
-            }
-
-        # Indeed: jobs
-        cur.execute("""
-            SELECT COUNT(*) as count,
-                   AVG(salary_min) as avg_sal_min,
-                   AVG(salary_max) as avg_sal_max
-            FROM civic_data.jobs
-            WHERE source = 'indeed'
-        """)
-        indeed = cur.fetchone()
-        if indeed and indeed["count"]:
-            report["sources"]["jobs"] = {
-                "listings": indeed["count"],
-                "avg_salary_min": round(indeed["avg_sal_min"]) if indeed["avg_sal_min"] else None,
-                "avg_salary_max": round(indeed["avg_sal_max"]) if indeed["avg_sal_max"] else None,
-            }
-
-    conn.close()
-    return json.dumps(report, ensure_ascii=False, indent=2)
 
 
 # ── TOOL 8 ─────────────────────────────────────────────────────────────────────
@@ -1106,13 +857,39 @@ async def civic_report(neighborhood: str) -> str:
     for source in ["code_violations", "building_permits", "fire_incidents",
                    "housing_condition", "food_safety", "environmental_nuisance",
                    "business_licenses", "transit_stops", "city_owned_property",
-                   "zoning_decisions", "parks_recreation", "community_centers"]:
+                   "zoning_decisions", "parks_recreation", "community_centers",
+                   "behavioral_centers", "infrastructure_projects", "citizen_reports",
+                   "opportunity_zones", "historic_markers", "education_facility",
+                   "education_facilities"]:
         inc = json.loads(get_city_incidents(source, neighborhood))
         if inc.get("total", 0) > 0:
             incidents_list.append(inc)
 
     business = json.loads(get_business_health(neighborhood))
     scores   = json.loads(analyze_neighborhood(neighborhood, "all"))
+
+    # Zillow housing data
+    conn = get_db()
+    housing = {}
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute("""
+            SELECT COUNT(*) as count, AVG(price) as avg_price,
+                   MIN(price) as min_price, MAX(price) as max_price,
+                   AVG(days_on_market) as avg_dom
+            FROM civic_data.properties
+            WHERE source = 'zillow' AND price > 0
+            AND (%s OR neighborhood ILIKE %s)
+        """, (neighborhood == "all", f"%{neighborhood}%"))
+        row = cur.fetchone()
+        if row and row["count"]:
+            housing = {
+                "listings": row["count"],
+                "avg_price": round(row["avg_price"]) if row["avg_price"] else None,
+                "min_price": round(row["min_price"]) if row["min_price"] else None,
+                "max_price": round(row["max_price"]) if row["max_price"] else None,
+                "avg_days_on_market": round(row["avg_dom"]) if row["avg_dom"] else None,
+            }
+    conn.close()
 
     # ── Step 2: Build RAG data block ────────────────────────────────────────────
     rag = {
@@ -1123,7 +900,9 @@ async def civic_report(neighborhood: str) -> str:
             "total": business.get("total", 0),
             "closed": business.get("closed", 0),
             "avg_rating": business.get("avg_rating"),
+            "top_categories": business.get("top_categories", {}),
         },
+        "housing_market": housing,
         "deprivation_scores": {
             idx: {
                 "score": s.get("score"),
@@ -1157,14 +936,18 @@ async def civic_report(neighborhood: str) -> str:
 @mcp.tool()
 async def post_ai_response(proposal_id: str) -> str:
     """
-    WRITE tool — closes the civic loop: reads a Decidim proposal, classifies it,
-    generates a neighborhood-aware AI recommendation, and posts it as an official
-    comment on the platform signed by Momentum AI.
-
-    Flow: get_proposals → classify_proposal → civic_report → recommend_action → GraphQL addComment
-    All data is real. No hallucinations. The comment is visible to citizens on mgm.styxcore.dev.
+    WRITE tool — closes the civic loop with data-enriched, human-tone response.
+    Flow:
+      1. Fetch proposal + existing comments
+      2. Classify → detect category + neighborhood
+      3. summarize_comments → understand citizen sentiment already in the thread
+      4. civic_report(neighborhood) → real Census, ArcGIS, Yelp, ADI/SVI/EJI data
+      5. get_meetings → next public meeting on this topic
+      6. Generate authoritative but human comment grounded in real data
+      7. Post on Decidim as Momentum AI
+    Tone: senior urban planner speaking to a citizen — factual, warm, actionable. No jargon.
     """
-    # ── Step 1: Fetch proposal ───────────────────────────────────────────────────
+    # ── Step 1: Fetch proposal + comments ────────────────────────────────────────
     pq = """
     query {
       participatoryProcesses {
@@ -1175,6 +958,7 @@ async def post_ai_response(proposal_id: str) -> str:
                 id
                 title { translation(locale: "en") }
                 body { translation(locale: "en") }
+                comments { id body alignment }
               }
             }
           }
@@ -1196,35 +980,84 @@ async def post_ai_response(proposal_id: str) -> str:
     title = (proposal.get("title") or {}).get("translation", "")
     body = (proposal.get("body") or {}).get("translation", "")
     text = f"{title}. {body}"[:500]
+    existing_comments = proposal.get("comments") or []
 
-    # ── Step 2: Classify ─────────────────────────────────────────────────────────
+    # ── Step 2: Classify + detect neighborhood ───────────────────────────────────
     classification = json.loads(await classify_proposal(text))
     category = classification.get("category", "governance")
-    summary = classification.get("summary", title)
     actionable = classification.get("311_actionable", False)
 
-    # ── Step 3: Neighborhood report ──────────────────────────────────────────────
-    report = json.loads(await civic_report("Montgomery"))
+    # Extract neighborhood hint from proposal text (zip codes or known area names)
+    nb_prompt = f"""From this civic proposal text, extract the Montgomery AL neighborhood or zip code mentioned.
+If none found, return null.
+Proposal: "{text}"
+Return JSON: {{"neighborhood": "name or null"}}"""
+    nb_raw = await _generate_json(nb_prompt, temperature=0.0)
+    try:
+        detected_nb = json.loads(nb_raw).get("neighborhood") or "Montgomery"
+    except Exception:
+        detected_nb = "Montgomery"
+
+    # ── Step 3: Citizen sentiment ─────────────────────────────────────────────────
+    sentiment_data = {}
+    if existing_comments:
+        sentiment_raw = await summarize_comments(proposal_id)
+        try:
+            sentiment_data = json.loads(sentiment_raw)
+        except Exception:
+            pass
+
+    # ── Step 4: Real civic data for this neighborhood ─────────────────────────────
+    report = json.loads(await civic_report(detected_nb))
     severity = report.get("overall_severity", "moderate")
+    findings = report.get("findings", [])
+    scores = report.get("deprivation_scores", {}) or {}
+    adi_score = (scores.get("ADI") or {}).get("score")
+    top_incidents = {i["source"]: i["total"] for i in (report.get("_sources", {}).get("incidents_sources") or [])}
 
-    # ── Step 4: Build AI comment ─────────────────────────────────────────────────
-    comment_prompt = f"""Write a short, respectful official response to a citizen proposal on the Momentum MGM civic platform.
-Respond as Momentum AI, the city's civic intelligence system.
+    # ── Step 5: Next public meeting ───────────────────────────────────────────────
+    meetings_raw = await get_meetings(upcoming_only=True)
+    meetings_data = json.loads(meetings_raw)
+    next_meeting = (meetings_data.get("meetings") or [None])[0]
+    next_meeting_str = ""
+    if next_meeting:
+        next_meeting_str = f"{next_meeting.get('title','')} — {(next_meeting.get('start') or '')[:10]}"
 
-Proposal: "{title}"
-Category: {category}
-Summary: {summary}
-City severity context: {severity}
-311 actionable: {actionable}
+    # ── Step 6: Generate human-tone comment grounded in data ─────────────────────
+    n_comments = len(existing_comments)
+    support_level = sentiment_data.get("support_level", "")
+    key_themes = sentiment_data.get("key_themes", [])
+    top_finding = findings[0].get("finding", "") if findings and isinstance(findings[0], dict) else (findings[0] if findings else "")
 
-Write 3-4 sentences in plain English. Be factual, encouraging, and specific about next steps.
-Do NOT use markdown, headers, or bullet points — plain text only.
-End with: "— Momentum AI, City of Montgomery Civic Intelligence"
+    comment_prompt = f"""You are Momentum AI, the civic intelligence system for the City of Montgomery, Alabama.
+Write a comment on a citizen proposal. Your tone: senior urban planner speaking directly to a resident — authoritative, warm, grounded in facts. Never bureaucratic, never cheerful. No emojis.
 
-Respond with just the comment text, no JSON."""
+PROPOSAL: "{title}"
+CATEGORY: {category}
+NEIGHBORHOOD: {detected_nb}
+
+CITIZEN CONTEXT:
+- {n_comments} citizens have commented on this proposal
+- Community sentiment: {support_level or "mixed"}
+- Key themes raised by citizens: {', '.join(key_themes[:3]) if key_themes else "not yet analyzed"}
+
+REAL DATA FOR THIS NEIGHBORHOOD:
+- Overall severity: {severity}
+- ADI deprivation score: {f"{round(adi_score * 100)}th percentile" if adi_score else "not available"} (higher = more deprived)
+- Top confirmed finding: {top_finding}
+- 311 actionable: {actionable}
+- Next public meeting: {next_meeting_str or "check mgm.styxcore.dev for upcoming meetings"}
+
+RULES:
+- Reference the citizen discussion naturally ("Several residents have raised...", "The community has flagged...")
+- Cite 1-2 real numbers from the data above — translate them into human impact
+- Give one concrete next step (funding, meeting, 311, city department)
+- 3-4 sentences max. Plain English. No bullet points. No markdown.
+- End with: "— Momentum AI, City of Montgomery"
+
+Write only the comment text."""
 
     comment_body = await _generate_json(comment_prompt, temperature=0.3)
-    # Strip JSON wrapper if model wrapped it
     try:
         parsed = json.loads(comment_body)
         comment_body = parsed.get("comment", comment_body) if isinstance(parsed, dict) else comment_body
@@ -1232,7 +1065,7 @@ Respond with just the comment text, no JSON."""
         pass
     comment_body = comment_body.strip().strip('"')
 
-    # ── Step 5: Post via GraphQL mutation ────────────────────────────────────────
+    # ── Step 7: Post via GraphQL ──────────────────────────────────────────────────
     mutation = """
     mutation($id: String!, $type: String!, $body: String!) {
       commentable(id: $id, type: $type) {
@@ -1255,8 +1088,11 @@ Respond with just the comment text, no JSON."""
         "proposal_id": proposal_id,
         "proposal_title": title,
         "category": category,
+        "neighborhood_analyzed": detected_nb,
+        "severity": severity,
+        "citizen_comments_read": n_comments,
         "comment_id": comment.get("id"),
-        "comment_preview": comment_body[:200],
+        "comment_preview": comment_body[:300],
         "platform_url": f"{os.getenv('DECIDIM_URL')}/processes",
     }, ensure_ascii=False, indent=2)
 
