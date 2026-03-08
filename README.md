@@ -31,6 +31,10 @@ LAYER 1 — CITIZEN PLATFORM (Decidim 0.31.2, live at mgm.styxcore.dev)
   Simulated civic society: 20 citizens, 40 proposals, 60 comments, 12 public meetings
   Raspberry Pi 5 ARM64, native Ruby on Rails, Cloudflare tunnel
 
+  NOTE: Seeded citizens (20 characters) are SIMULATION ONLY — demo for judges.
+  In real deployment they are purged. AI tools remain active. The AI never
+  impersonates a citizen — always signs as "Momentum AI".
+
 LAYER 2 — CIVIC DATA LAKE (real Montgomery open data, PostgreSQL + pgvector)
 
   civic_data.city_data — Montgomery ArcGIS Open Data (60,609 records, 19 sources):
@@ -50,7 +54,7 @@ LAYER 2 — CIVIC DATA LAKE (real Montgomery open data, PostgreSQL + pgvector)
   civic_data.properties   — Zillow: 500 properties
   civic_data.embeddings   — pgvector (gemini-embedding-001, 3072d): ~61,000 embeddings
 
-LAYER 3 — MCP SERVER (20 tools, Python FastMCP)
+LAYER 3 — MCP SERVER (17 tools, Python FastMCP)
   Connects Claude directly to Decidim + the data lake + Google Workspace.
   Available at: https://mcp.styxcore.dev/mcp
   City administrators query their city in plain language — from any device.
@@ -69,13 +73,12 @@ DETECT     get_census_trend()          14yr OLS regression per metric, R² confi
 
 UNDERSTAND analyze_neighborhood()     ADI + SVI + EJI composite deprivation scores
            semantic_civic_search()    pgvector cosine similarity across all civic data
-           get_neighborhood_intelligence()  Census + Zillow + Yelp aggregated
+           summarize_comments()       Sentiment + theme extraction on proposal comments
 
 REPORT     civic_report()             Full AI report — RAG + Gemini 2.5 Flash + CoT
            find_solutions()           Federal programs + comparable cities + concrete actions
 
-ACT        recommend_action()         Concrete step + department + 311 routing
-           post_ai_response()         AI comment posted directly back to Decidim
+ACT        post_ai_response()         Civic loop closed: neighborhood report → AI comment on Decidim
            export_to_sheet()          Neighborhood data → Google Sheets (live)
            create_report_doc()        Full report → Google Doc (shareable)
            sync_gcal()                Public meetings → Google Calendar
@@ -89,25 +92,20 @@ All real data. No hallucination. Grounded in actual Montgomery statistics.
 
 ---
 
-## MCP Tools (20)
+## MCP Tools (17)
 
 ### Decidim Layer
 | Tool | Description |
 |---|---|
 | `get_proposals` | Citizen proposals from Decidim, filterable by category |
 | `classify_proposal` | AI classification into 10 civic categories + 311 routing |
-| `analyze_trends` | Proposal volume and top issues by votes |
-| `recommend_action` | Concrete city administration action + department + 311 service |
-| `get_platform_summary` | Full Decidim platform snapshot |
-| `get_montgomery_context` | Scraped Montgomery city data lookup |
-| `post_ai_response` | Closed civic loop: proposal → AI analysis → comment posted to Decidim |
+| `post_ai_response` | Civic loop closed: proposal → sentiment analysis → neighborhood report → AI comment posted to Decidim |
 | `get_meetings` | All public meetings and hearings from Decidim |
 | `summarize_comments` | Sentiment analysis + theme extraction on any proposal's comments |
 
 ### Data Lake Layer
 | Tool | Description |
 |---|---|
-| `get_neighborhood_intelligence` | Census + Zillow + Yelp multi-source aggregated report |
 | `semantic_civic_search` | pgvector cosine similarity across all 61K civic embeddings |
 | `get_census_trend` | 14yr OLS regression per metric, 2026 projection, R² confidence |
 | `get_city_incidents` | 19 ArcGIS sources: counts, status breakdown, neighborhood filter |
@@ -121,7 +119,7 @@ All real data. No hallucination. Grounded in actual Montgomery statistics.
 ### Report + Solutions Layer
 | Tool | Description |
 |---|---|
-| `civic_report` | Full AI neighborhood report — RAG + Gemini 2.5 Flash + CoT, JSON schema |
+| `civic_report` | Full AI neighborhood report — RAG + Gemini 2.5 Flash + CoT, all 19 ArcGIS sources + Zillow |
 | `find_solutions` | Federal programs (HUD/EPA/DOT/USDA) + comparable cities + concrete Montgomery recommendations |
 
 ### Google Workspace Layer
@@ -141,7 +139,7 @@ The MCP server is live and public. Add it as a connector in Claude (web or mobil
 https://mcp.styxcore.dev/mcp
 ```
 
-No authentication required. All 20 tools immediately available.
+No authentication required. All 17 tools immediately available.
 
 ---
 
@@ -178,7 +176,7 @@ Brazil is building toward this. We shipped it.
 ```
 momentum-mgm/
 ├── mcp-server/
-│   ├── server.py              ← 20 MCP tools
+│   ├── server.py              ← 17 MCP tools
 │   ├── workspace_client.py    ← Google Workspace (Sheets, Docs, Calendar, Drive)
 │   ├── decidim_client.py      ← Decidim GraphQL client (read + write, JWT auth)
 │   ├── authorize_google.py    ← One-time OAuth2 flow
@@ -206,8 +204,8 @@ momentum-mgm/
 |---|---|---|
 | 1 | Mar 5 | Decidim live at mgm.styxcore.dev |
 | 2 | Mar 6 | Data lake: 60K records ArcGIS + Census + Zillow + Yelp + 61K embeddings |
-| 3 | Mar 7 | MCP server 17 tools, civic loop closed, simulated civic society |
-| 4 | Mar 8 | Google Workspace (tools 18-20), MCP HTTP live at mcp.styxcore.dev/mcp |
+| 3 | Mar 7 | MCP server 15 tools, civic loop closed, simulated civic society |
+| 4 | Mar 8 | Google Workspace (tools 16-17), MCP HTTP live at mcp.styxcore.dev/mcp, tool audit + neighborhood fuzzy matching |
 | 5 | Mar 9 | Submission |
 
 ---
