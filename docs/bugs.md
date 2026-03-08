@@ -496,3 +496,36 @@ Recorded during Day 2 full doc audit. These are intentional deviations from orig
   ```
 - **Rationale:** Les prompts évoluent indépendamment du code Python. Un changement de prompt ne nécessite pas de toucher à la logique du tool. Versionnage séparé, itération rapide, lisibilité. Pattern utilisé en production par LangChain, Semantic Kernel (Microsoft), et PromptLayer.
 - **Dépendance ajoutée:** `jinja2>=3.1.0` dans `mcp-server/requirements.txt`.
+
+### [BUG-040] Decidim Redis cache — changements de vues pas reflétés en live
+- **Date:** 2026-03-08
+- **Severity:** High
+- **Status:** Workaround documenté
+- **Symptom:** Après modification de vues Decidim (ex: `_application.html.erb`), les changements n'apparaissent pas sur mgm.styxcore.dev même après reload. L'ancienne version reste servie.
+- **Root Cause:** Decidim utilise Redis (DB 1) comme cache store en mode boost performance. Les fragments de vue et les assets sont mis en cache dans Redis. Les modifications de fichiers ne triggent pas d'invalidation automatique du cache Redis.
+- **Ce qu'il NE FAUT PAS faire:** `redis-cli FLUSHALL` — vide TOUTE l'instance Redis, incluant les jobs Sidekiq en attente, les sessions ActionCable, et potentiellement les données rpg-forum (DB 0). Irréversible.
+- **Fix correct:** Vider uniquement le namespace Decidim:
+  ```bash
+  redis-cli -n 1 FLUSHDB   # vide seulement la DB 1 (Decidim cache), pas les autres
+  touch /home/styxknight/momentum-app/tmp/restart.txt  # force le reload Puma
+  ```
+- **Lesson:** Redis est partagé entre plusieurs services sur ce Pi. Toujours cibler la DB spécifique (`-n 1` pour Decidim). JAMAIS `FLUSHALL`. `FLUSHDB` sur la bonne DB est sûr et suffisant.
+
+### [BUG-038] Decidim — duplicate banner landmark (axe moderate violation)
+- **Date:** 2026-03-08
+- **Severity:** Medium
+- **Status:** Fixed
+- **Symptom:** Lighthouse/axe audit: "Document should not have more than one banner landmark". Flagged on every page of mgm.styxcore.dev.
+- **Root Cause:** The `_application.html.erb` override injected the sr-only H1 inside a `<header>` element. Top-level `<header>` has implicit `role="banner"`. Decidim's existing navbar already renders its own `<header>` (also role=banner). Two banner landmarks on every page = axe violation.
+- **Fix:** Replace `<header aria-label="Page title">` with `<div>` — plain div has no landmark role. The visually-hidden H1 is still readable by screen readers. Only one banner landmark remains (the Decidim navbar).
+- **File:** `app/views/layouts/decidim/_application.html.erb`
+- **Lesson:** Only `<header>` at the top level (not inside `<article>`, `<aside>`, `<main>`, `<nav>`, `<section>`) has implicit role=banner. For sr-only content that must not be a landmark, use `<div>`.
+
+### [BUG-039] Decidim — gamification badge error (500) after addComment on Debate
+- **Date:** 2026-03-08
+- **Severity:** Low
+- **Status:** Fixed (workaround)
+- **Symptom:** `post_debate_summary` and `post_ai_response` return HTTP 500 with `"Invalid badge for this UserBase type"` after posting a comment. The MCP tool was treating this as a fatal error and returning `{"error": "Invalid badge..."}` even though the comment was successfully inserted in DB.
+- **Root Cause:** Decidim gamification module fires an event hook after every `addComment` mutation. It tries to increment a badge score for the comment author. `Decidim::Api::ApiUser` is not a `Decidim::User` — it has no badge profile. The badge scorer raises `InvalidBadge`. This fires AFTER the comment is committed to DB, so the comment exists but the response is 500.
+- **Fix:** Filter gamification errors from the GraphQL response before treating them as real errors: `real_errors = [e for e in errors if "badge" not in e.get("message", "").lower()]`. Comment is considered posted if no real errors remain.
+- **Lesson:** Decidim post-commit hooks (gamification, notifications) can fail without rolling back the DB transaction. Always check if the record exists in DB before concluding a write failed.
