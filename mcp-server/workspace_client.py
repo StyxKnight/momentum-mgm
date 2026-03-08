@@ -147,9 +147,6 @@ def create_calendar(name: str) -> tuple:
     body = {'summary': name, 'timeZone': 'America/Chicago'}
     result = cal.calendars().insert(body=body).execute()
     cal_id = result['id']
-    cal.acl().insert(
-        calendarId=cal_id,
-        body={'role': 'writer', 'scope': {'type': 'user', 'value': os.getenv('GOOGLE_ADMIN_EMAIL')}}
-    ).execute()
+    # Skip ACL share — OAuth user already owns this calendar
     url = f"https://calendar.google.com/calendar/r?cid={cal_id}"
     return cal_id, url

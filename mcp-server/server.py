@@ -1274,7 +1274,6 @@ async def get_meetings(upcoming_only: bool = False) -> str:
                 address
                 location { translation(locale: "en") }
                 attendeesCount
-                commentsCount
               }
             }
           }
@@ -1306,7 +1305,6 @@ async def get_meetings(upcoming_only: bool = False) -> str:
                     "address": node.get("address", ""),
                     "location": (node.get("location") or {}).get("translation", ""),
                     "attendees": node.get("attendeesCount", 0),
-                    "comments": node.get("commentsCount", 0),
                 })
 
     meetings.sort(key=lambda m: m.get("start") or "")
