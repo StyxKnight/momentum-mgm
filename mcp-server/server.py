@@ -2131,7 +2131,7 @@ async def post_debate_summary(debate_id: str) -> str:
       4. Post as Momentum AI on the debate thread
     Tone: neutral facilitator presenting verified facts — no advocacy, no spin.
     """
-    # ── Step 1: Fetch debate + comments ──────────────────────────────────────────
+    # ── Step 1: Fetch debate + comments (processes + assemblies) ─────────────────
     dq = """
     query {
       participatoryProcesses {
@@ -2148,11 +2148,27 @@ async def post_debate_summary(debate_id: str) -> str:
           }
         }
       }
+      assemblies {
+        components {
+          ... on Debates {
+            debates(first: 200) {
+              nodes {
+                id
+                title { translation(locale: "en") }
+                description { translation(locale: "en") }
+                comments { id body alignment }
+              }
+            }
+          }
+        }
+      }
     }"""
     data = await graphql(dq)
     debate = None
-    for proc in (data.get("data", {}).get("participatoryProcesses") or []):
-        for comp in (proc.get("components") or []):
+    # Search in processes
+    for space in list(data.get("data", {}).get("participatoryProcesses") or []) + \
+                 list(data.get("data", {}).get("assemblies") or []):
+        for comp in (space.get("components") or []):
             for node in (comp.get("debates", {}).get("nodes") or []):
                 if str(node["id"]) == str(debate_id):
                     debate = node
