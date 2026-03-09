@@ -50,11 +50,11 @@ LAYER 2 — CIVIC DATA LAKE (real Montgomery open data, PostgreSQL + pgvector)
     infrastructure_projects      10
 
   civic_data.census       — Census ACS 5-year estimates: 11,334 rows, 2012–2024, 71 tracts
-  civic_data.businesses   — Yelp via Bright Data: 869 businesses
+  civic_data.businesses   — Yelp via Bright Data: 1,561 businesses
   civic_data.properties   — Zillow: 500 properties
   civic_data.embeddings   — pgvector (gemini-embedding-001, 3072d): ~61,000 embeddings
 
-LAYER 3 — MCP SERVER (24 tools, Python FastMCP)
+LAYER 3 — MCP SERVER (22 tools, Python FastMCP)
   Connects Claude directly to Decidim + the data lake + Google Workspace.
   Available at: https://mcp.styxcore.dev/mcp
   City administrators query their city in plain language — from any device.
@@ -169,7 +169,7 @@ The MCP server is live and public. No authentication required.
 1. Open Claude.ai → Settings → **Integrations**
 2. Click **Add integration**
 3. Paste: `https://mcp.styxcore.dev/mcp`
-4. All 24 tools are immediately available
+4. All 22 tools are immediately available
 
 ### Claude Desktop (macOS / Windows)
 
@@ -256,7 +256,7 @@ Brazil is building toward this. We shipped it.
 ```
 momentum-mgm/
 ├── mcp-server/
-│   ├── server.py              ← 24 MCP tools
+│   ├── server.py              ← 22 MCP tools
 │   ├── workspace_client.py    ← Google Workspace (Sheets, Docs, Calendar, Drive)
 │   ├── decidim_client.py      ← Decidim GraphQL client (read + write, JWT auth)
 │   ├── authorize_google.py    ← One-time OAuth2 flow
