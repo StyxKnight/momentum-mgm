@@ -54,7 +54,7 @@ LAYER 2 — CIVIC DATA LAKE (real Montgomery open data, PostgreSQL + pgvector)
   civic_data.properties   — Zillow: 500 properties
   civic_data.embeddings   — pgvector (gemini-embedding-001, 3072d): ~61,000 embeddings
 
-LAYER 3 — MCP SERVER (18 tools, Python FastMCP)
+LAYER 3 — MCP SERVER (19 tools, Python FastMCP)
   Connects Claude directly to Decidim + the data lake + Google Workspace.
   Available at: https://mcp.styxcore.dev/mcp
   City administrators query their city in plain language — from any device.
@@ -93,43 +93,46 @@ All real data. No hallucination. Grounded in actual Montgomery statistics.
 
 ---
 
-## MCP Tools (18)
+## MCP Tools (19)
 
 ### Decidim Layer
 | Tool | Description |
 |---|---|
-| `get_proposals` | Citizen proposals from Decidim, filterable by category |
-| `classify_proposal` | AI classification into 10 civic categories + 311 routing |
-| `post_ai_response` | Civic loop closed: proposal → sentiment analysis → neighborhood report → AI comment posted to Decidim |
-| `get_meetings` | All public meetings and hearings from Decidim |
-| `summarize_comments` | Sentiment analysis + theme extraction on any proposal's comments |
+| `get_proposals` | Live citizen proposals from Decidim. Filter by category: public_safety, housing, economy, infrastructure, environment, health, education, transportation. Returns title, body, vote count. |
+| `classify_proposal` | Gemini 2.5 Flash classifies any text into 10 civic categories. Returns category, confidence, keywords, and whether a 311 ticket should be opened. |
+| `get_meetings` | All public meetings and hearings from Decidim — city council sessions, participatory process assemblies, public consultations. `upcoming_only=True` filters to future meetings. |
+| `summarize_comments` | Fetches all citizen comments on a proposal. Returns AI summary: sentiment, support_level, key themes, main concerns, consensus points. |
+| `post_ai_response` | **WRITE** — Full civic loop: fetches proposal + comments → classifies → pulls civic_report for the neighborhood → gets next public meeting → generates a grounded 3–4 sentence comment → posts on Decidim as Momentum AI. |
+| `post_debate_summary` | **WRITE** — AI reads a debate thread. If empty: posts an opening brief with real city data on both sides. If comments exist: posts a neutral synthesis of pro/contra positions + data layer. Works on both participatory processes and assemblies. |
 
 ### Data Lake Layer
 | Tool | Description |
 |---|---|
-| `semantic_civic_search` | pgvector cosine similarity across all 61K civic embeddings |
-| `get_census_trend` | 14yr OLS regression per metric, 2026 projection, R² confidence |
-| `get_city_incidents` | 19 ArcGIS sources: counts, status breakdown, neighborhood filter |
-| `get_business_health` | Yelp closure rate, avg rating, top categories by neighborhood |
+| `get_census_trend` | OLS linear regression on Census ACS 2012–2024 for 5 metrics: median_income, poverty_below, housing_vacant, unemployed, median_rent. Returns slope, current value, 2026 projection, R² per metric. R² < 0.5 flagged low_confidence. |
+| `get_city_incidents` | Raw ArcGIS counts for one source at a time across 16 city datasets. `source='list'` returns all sources with totals. Filterable by neighborhood. No AI — pure SQL. |
+| `get_business_health` | Yelp data: total businesses, closed count, avg rating, avg review count (foot traffic proxy), top 5 categories. Closure rate > 15% = commercial distress (LISC standard). |
+| `semantic_civic_search` | pgvector cosine similarity across ~61K embeddings (gemini-embedding-001, 3072d). Finds conceptually related properties, businesses, and city records. Example: "abandoned buildings near schools". |
 
 ### Analysis Layer
 | Tool | Description |
 |---|---|
-| `analyze_neighborhood` | ADI + SVI + EJI composite deprivation scores, Z-score vs 71 tracts |
-| `detect_civic_gaps` | Silent zones — neighborhoods with high ArcGIS incident load but zero citizen proposals |
+| `analyze_neighborhood` | Computes ADI (UW Madison/HRSA), SVI (CDC/ATSDR), EJI (EPA) for any Montgomery neighborhood. Z-score normalized + percentile ranked against all 71 census tracts. Score 0–1, higher = worse. `neighborhood='list'` returns top 5 most deprived. |
+| `detect_civic_gaps` | Finds silent zones — neighborhoods with high ArcGIS incident density but zero citizen proposals on Decidim. gap_score = incident_load / max(1, proposals). Pure SQL, no AI. |
 
 ### Report + Solutions Layer
 | Tool | Description |
 |---|---|
-| `civic_report` | Full AI neighborhood report — RAG + Gemini 2.5 Flash + CoT, all 19 ArcGIS sources + Zillow |
-| `find_solutions` | Federal programs (HUD/EPA/DOT/USDA) + comparable cities + concrete Montgomery recommendations |
+| `civic_report` | Full civic intelligence report. Aggregates Census OLS + 16 ArcGIS sources + Yelp + Zillow + ADI/SVI/EJI scores + citizen survey signals → Gemini 2.5 Flash (temp 0.1) with Jinja2 RAG prompt + Chain of Thought. All numbers DB-verified before AI writes a word. 20–40s latency. |
+| `find_solutions` | 3 parallel Brave Search queries (federal programs, global best practices, Montgomery-specific) + real Census stats → Gemini 2.5 Flash (temp 0.4). Returns active HUD/EPA/DOT grant programs with real URLs, comparable city case studies, concrete local recommendations. 30–60s latency. |
 
 ### Google Workspace Layer
 | Tool | Description |
 |---|---|
-| `export_to_sheet` | Neighborhood data (Census trends + incidents + business health + scores) → Google Sheets |
-| `create_report_doc` | Civic report + solutions → formatted Google Doc, shared with city admin |
-| `sync_gcal` | Decidim public meetings → Google Calendar with deduplication |
+| `export_to_sheet` | Census trends + ArcGIS incidents + business health + ADI/SVI/EJI scores → Google Sheets. Creates or reuses "Momentum MGM — Civic Intelligence" spreadsheet. Returns shareable link. |
+| `create_report_doc` | Runs civic_report + find_solutions → Gemini rewrites as executive prose → Google Doc. Ready for city hall. Returns shareable link. |
+| `sync_gcal` | Syncs all Decidim public meetings to Google Calendar with deduplication. Creates "Montgomery Civic — Public Meetings" calendar if needed. |
+| `create_report_slides` | Civic intelligence report → Google Slides presentation. |
+| `create_action_tasks` | Priority actions from civic analysis → Google Tasks. |
 
 ---
 
@@ -141,7 +144,7 @@ The MCP server is live and public. Add it as a connector in Claude (web or mobil
 https://mcp.styxcore.dev/mcp
 ```
 
-No authentication required. All 18 tools immediately available.
+No authentication required. All 19 tools immediately available.
 
 ---
 
@@ -178,7 +181,7 @@ Brazil is building toward this. We shipped it.
 ```
 momentum-mgm/
 ├── mcp-server/
-│   ├── server.py              ← 18 MCP tools
+│   ├── server.py              ← 19 MCP tools
 │   ├── workspace_client.py    ← Google Workspace (Sheets, Docs, Calendar, Drive)
 │   ├── decidim_client.py      ← Decidim GraphQL client (read + write, JWT auth)
 │   ├── authorize_google.py    ← One-time OAuth2 flow
