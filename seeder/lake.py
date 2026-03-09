@@ -77,7 +77,7 @@ CENSUS_VARS = {
     "edu_bachelors_plus": "B15003_022E",
 }
 
-RECORDS_LIMIT = 500
+RECORDS_LIMIT = 400
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("lake")

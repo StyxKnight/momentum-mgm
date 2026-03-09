@@ -1012,8 +1012,9 @@ async def civic_report(neighborhood: str) -> str:
         if inc.get("total", 0) > 0:
             incidents_list.append(inc)
 
-    business = json.loads(get_business_health(neighborhood))
-    scores   = json.loads(analyze_neighborhood(neighborhood, "all"))
+    business   = json.loads(get_business_health(neighborhood))
+    scores     = json.loads(analyze_neighborhood(neighborhood, "all"))
+    job_market = json.loads(get_job_market(neighborhood))
 
     # Zillow housing data + survey citizen signals
     conn = get_db()
@@ -1095,6 +1096,15 @@ async def civic_report(neighborhood: str) -> str:
             if "score" in s
         },
         "citizen_survey_signals": survey_signals,
+        "workforce": {
+            "unemployment_rate_pct": job_market.get("workforce", {}).get("unemployment_rate_pct"),
+            "city_avg_unemployment_pct": job_market.get("workforce", {}).get("city_avg_unemployment_pct"),
+            "median_household_income": job_market.get("income", {}).get("median_household_income"),
+            "city_avg_median_income": job_market.get("income", {}).get("city_avg_median_income"),
+            "bachelors_plus_pct": job_market.get("education", {}).get("bachelors_plus_pct"),
+            "poverty_rate_pct": job_market.get("poverty", {}).get("poverty_rate_pct"),
+            "city_avg_poverty_pct": job_market.get("poverty", {}).get("city_avg_poverty_pct"),
+        },
     }
 
     # ── Step 3: Render prompt from Jinja2 template ──────────────────────────────
@@ -2412,6 +2422,76 @@ def get_budget_results(budget_id: int = None) -> str:
         "rejected_projects": [r for r in results if r["status"] == "rejected"],
         "next_steps": _next_steps("get_budget_results"),
     }, ensure_ascii=False, indent=2)
+
+
+# ── TOOL 23 — get_job_market ─────────────────────────────────────────────────
+
+@mcp.tool()
+def get_job_market(neighborhood: str = None) -> str:
+    """
+    WORKFORCE tool — Census ACS data, no AI, pure SQL.
+    Returns employment and economic indicators for a Montgomery neighborhood:
+    unemployment rate, median income, education attainment, poverty rate.
+    Compares neighborhood vs city-wide averages.
+    neighborhood=None returns city-wide totals.
+    Use for Workforce Growth analysis and economic equity assessment.
+    """
+    conn = get_db()
+    nb = _resolve_neighborhood(neighborhood)
+
+    def _fetch(where_clause, params):
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(f"""
+                SELECT
+                    SUM(CASE WHEN metric='labor_force'        THEN value END) as labor_force,
+                    SUM(CASE WHEN metric='unemployed'         THEN value END) as unemployed,
+                    AVG(CASE WHEN metric='median_income'      THEN value END) as median_income,
+                    SUM(CASE WHEN metric='edu_bachelors_plus' THEN value END) as edu_bachelors,
+                    SUM(CASE WHEN metric='edu_total'          THEN value END) as edu_total,
+                    SUM(CASE WHEN metric='poverty_below'      THEN value END) as poverty_below,
+                    SUM(CASE WHEN metric='poverty_total'      THEN value END) as poverty_total,
+                    SUM(CASE WHEN metric='population'         THEN value END) as population
+                FROM civic_data.census
+                WHERE year = (SELECT MAX(year) FROM civic_data.census)
+                {where_clause}
+            """, params)
+            return cur.fetchone()
+
+    row = _fetch("AND (%s IS NULL OR neighborhood ILIKE %s)", (nb, f"%{nb}%" if nb else None))
+    city = _fetch("", ())
+
+    def _rate(num, den):
+        if num and den and float(den) > 0:
+            return round(float(num) / float(den) * 100, 1)
+        return None
+
+    result = {
+        "neighborhood": nb or "Montgomery (city-wide)",
+        "data_source": "US Census ACS 5-year estimates (2023), 71 tracts Montgomery County AL",
+        "year": 2023,
+        "workforce": {
+            "labor_force": int(row["labor_force"]) if row["labor_force"] else None,
+            "unemployment_rate_pct": _rate(row["unemployed"], row["labor_force"]),
+            "city_avg_unemployment_pct": _rate(city["unemployed"], city["labor_force"]),
+        },
+        "income": {
+            "median_household_income": int(row["median_income"]) if row["median_income"] else None,
+            "city_avg_median_income": int(city["median_income"]) if city["median_income"] else None,
+        },
+        "education": {
+            "bachelors_plus_pct": _rate(row["edu_bachelors"], row["edu_total"]),
+            "city_avg_bachelors_pct": _rate(city["edu_bachelors"], city["edu_total"]),
+        },
+        "poverty": {
+            "poverty_rate_pct": _rate(row["poverty_below"], row["poverty_total"]),
+            "city_avg_poverty_pct": _rate(city["poverty_below"], city["poverty_total"]),
+        },
+        "population": int(row["population"]) if row["population"] else None,
+        "next_steps": _next_steps("get_job_market", {"neighborhood": nb}),
+    }
+
+    conn.close()
+    return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":

@@ -10,8 +10,9 @@ Before writing findings, reason through the data step by step:
 2. Cross-reference: do declining income + high violations + high poverty form a compounding pattern?
 3. Check business health: closed rate > 20% signals economic stress.
 4. Read deprivation scores: which index is highest? What are the top 3 driving factors?
-5. Read citizen_survey_signals: what do residents say are their top priorities? Note alignment or divergence vs. ArcGIS data.
-6. Identify 3 to 5 distinct factual findings. Each must cite a specific number from DATA.
+5. Read workforce data: compare unemployment_rate_pct vs city_avg_unemployment_pct, median_household_income vs city_avg_median_income, bachelors_plus_pct, poverty_rate_pct vs city_avg_poverty_pct. Flag any gap wider than 10 points or income below 70% of city average as a workforce finding.
+6. Read citizen_survey_signals: what do residents say are their top priorities? Note alignment or divergence vs. ArcGIS data.
+7. Identify 3 to 5 distinct factual findings. Each must cite a specific number from DATA.
    When writing counts of people or buildings in narrative text, round to nearest integer (Census ACS weighted estimates — 207.6 → 208 people). Keep raw decimals for rates, percentages, and dollar amounts.
    At least one finding must reference citizen survey data (e.g. "X of Y survey respondents prioritized...") if survey_signals has respondents > 0.
 7. Assign overall severity using quartile thresholds (ADI/SVI standard):
@@ -28,7 +29,7 @@ Before writing findings, reason through the data step by step:
   "severity_rationale": "One sentence citing the specific scores that justify this rating.",
   "findings": [
     {
-      "category": "housing|economy|environment|public_safety|health|infrastructure",
+      "category": "housing|economy|environment|public_safety|health|infrastructure|workforce|transportation|education|parks_culture|governance",
       "finding": "One factual sentence citing a specific number from DATA.",
       "metric_cited": "variable name",
       "value": "raw value from DATA",

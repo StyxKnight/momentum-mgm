@@ -70,6 +70,7 @@ CITIZEN submits proposal on mgm.styxcore.dev
 DETECT     get_census_trend()          14yr OLS regression per metric, R² confidence
            get_city_incidents()        19 ArcGIS sources, neighborhood-filtered
            get_business_health()       Yelp closure rates, avg rating
+           get_job_market()            Unemployment, income, education, poverty vs city avg
 
 UNDERSTAND analyze_neighborhood()     ADI + SVI + EJI composite deprivation scores
            detect_civic_gaps()        Silent zones — high incidents, zero citizen voice
@@ -118,11 +119,12 @@ All real data. No hallucination. Grounded in actual Montgomery statistics.
 |---|---|
 | `analyze_neighborhood` | Computes ADI (UW Madison/HRSA), SVI (CDC/ATSDR), EJI (EPA) for any Montgomery neighborhood. Z-score normalized + percentile ranked against all 71 census tracts. Score 0–1, higher = worse. `neighborhood='list'` returns top 5 most deprived. |
 | `detect_civic_gaps` | Finds silent zones — neighborhoods with high ArcGIS incident density but zero citizen proposals on Decidim. gap_score = incident_load / max(1, proposals). Pure SQL, no AI. |
+| `get_job_market` | Census ACS workforce indicators for any Montgomery neighborhood: unemployment rate, median household income, education attainment (bachelor's+), poverty rate — all compared vs city-wide averages. Pure SQL, instant. Covers all 10 civic categories including workforce/economy. |
 
 ### Report + Solutions Layer
 | Tool | Description |
 |---|---|
-| `civic_report` | Full civic intelligence report. Aggregates Census OLS + 16 ArcGIS sources + Yelp + Zillow + ADI/SVI/EJI scores + citizen survey signals → Gemini 2.5 Flash (temp 0.1) with Jinja2 RAG prompt + Chain of Thought. All numbers DB-verified before AI writes a word. 20–40s latency. |
+| `civic_report` | Full civic intelligence report. Aggregates Census OLS + 19 ArcGIS sources + Yelp + Zillow + ADI/SVI/EJI scores + workforce indicators (Census ACS) + citizen survey signals → Gemini 2.5 Flash (temp 0.1) with Jinja2 RAG prompt + Chain of Thought. Covers all 10 civic categories: housing, economy, environment, public_safety, health, infrastructure, workforce, transportation, education, parks_culture, governance. All numbers DB-verified before AI writes a word. 20–40s latency. |
 | `find_solutions` | 3 parallel Brave Search queries (federal programs, global best practices, Montgomery-specific) + real Census stats → Gemini 2.5 Flash (temp 0.4). Returns active HUD/EPA/DOT grant programs with real URLs, comparable city case studies, concrete local recommendations. 30–60s latency. |
 
 ### Google Workspace Layer
@@ -149,7 +151,7 @@ The MCP server is live and public. Add it as a connector in Claude (web or mobil
 https://mcp.styxcore.dev/mcp
 ```
 
-No authentication required. All 19 tools immediately available.
+No authentication required. All 21 tools immediately available.
 
 ---
 
