@@ -50,11 +50,11 @@ LAYER 2 — CIVIC DATA LAKE (real Montgomery open data, PostgreSQL + pgvector)
     infrastructure_projects      10
 
   civic_data.census       — Census ACS 5-year estimates: 11,334 rows, 2012–2024, 71 tracts
-  civic_data.businesses   — Yelp via Bright Data: 500 businesses
+  civic_data.businesses   — Yelp via Bright Data: 869 businesses
   civic_data.properties   — Zillow: 500 properties
   civic_data.embeddings   — pgvector (gemini-embedding-001, 3072d): ~61,000 embeddings
 
-LAYER 3 — MCP SERVER (19 tools, Python FastMCP)
+LAYER 3 — MCP SERVER (24 tools, Python FastMCP)
   Connects Claude directly to Decidim + the data lake + Google Workspace.
   Available at: https://mcp.styxcore.dev/mcp
   City administrators query their city in plain language — from any device.
@@ -148,7 +148,7 @@ All real data. No hallucination. Grounded in actual Montgomery statistics.
 | Tool | Description |
 |---|---|
 | `export_to_sheet` | Census trends + ArcGIS incidents + business health + ADI/SVI/EJI scores → Google Sheets. Creates or reuses "Momentum MGM — Civic Intelligence" spreadsheet. Returns shareable link. |
-| `create_report_doc` | Runs civic_report + find_solutions → Gemini rewrites as executive prose → Google Doc. Ready for city hall. Returns shareable link. |
+| `create_report_doc` | Agnostic formatter — receives civic_report + find_solutions outputs → structures into Google Doc. No AI inside. Returns shareable link. |
 | `sync_gcal` | Syncs all Decidim public meetings to Google Calendar with deduplication. Creates "Montgomery Civic — Public Meetings" calendar if needed. |
 | `create_report_slides` | Civic intelligence report → Google Slides presentation. |
 | `create_action_tasks` | Priority actions from civic analysis → Google Tasks. |
@@ -162,13 +162,62 @@ All real data. No hallucination. Grounded in actual Montgomery statistics.
 
 ## Connect to Claude
 
-The MCP server is live and public. Add it as a connector in Claude (web or mobile):
+The MCP server is live and public. No authentication required.
+
+### Claude.ai (web or mobile)
+
+1. Open Claude.ai → Settings → **Integrations**
+2. Click **Add integration**
+3. Paste: `https://mcp.styxcore.dev/mcp`
+4. All 24 tools are immediately available
+
+### Claude Desktop (macOS / Windows)
+
+Add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "momentum-mgm": {
+      "url": "https://mcp.styxcore.dev/mcp"
+    }
+  }
+}
+```
+
+---
+
+## Run the Demo
+
+Once connected, ask Claude:
 
 ```
-https://mcp.styxcore.dev/mcp
+Run create_full_demo for Centennial Hill
 ```
 
-No authentication required. All 21 tools immediately available.
+This executes the full pipeline:
+**DETECT → ANALYZE → REPORT → CITIZEN VOICE → OUTPUT**
+
+Returns public Google Doc + Slides + Sheet links. No sign-in required to view.
+
+Or explore individual tools:
+
+```
+What are the most deprived neighborhoods in Montgomery?
+→ analyze_neighborhood(neighborhood="list")
+
+Show me a full civic intelligence report for West Side
+→ civic_report(neighborhood="West Side")
+
+What federal programs exist for housing issues in Centennial Hill?
+→ find_solutions(problem="housing poverty", neighborhood="Centennial Hill")
+
+What are citizens proposing on the platform?
+→ get_proposals()
+
+What did the participatory budget fund?
+→ get_budget_results()
+```
 
 ---
 
@@ -205,7 +254,7 @@ Brazil is building toward this. We shipped it.
 ```
 momentum-mgm/
 ├── mcp-server/
-│   ├── server.py              ← 19 MCP tools
+│   ├── server.py              ← 24 MCP tools
 │   ├── workspace_client.py    ← Google Workspace (Sheets, Docs, Calendar, Drive)
 │   ├── decidim_client.py      ← Decidim GraphQL client (read + write, JWT auth)
 │   ├── authorize_google.py    ← One-time OAuth2 flow
@@ -234,8 +283,8 @@ momentum-mgm/
 | 1 | Mar 5 | Decidim live at mgm.styxcore.dev |
 | 2 | Mar 6 | Data lake: 60K records ArcGIS + Census + Zillow + Yelp + 61K embeddings |
 | 3 | Mar 7 | MCP server 15 tools, civic loop closed, simulated civic society |
-| 4 | Mar 8 | Google Workspace, MCP HTTP live at mcp.styxcore.dev/mcp, tool audit, neighborhood fuzzy matching, detect_civic_gaps (tool 18), next_steps guidance in all tools |
-| 5 | Mar 9 | Submission |
+| 4 | Mar 8 | Google Workspace, MCP HTTP live at mcp.styxcore.dev/mcp, tool audit, neighborhood fuzzy matching, detect_civic_gaps, next_steps guidance in all tools |
+| 5 | Mar 9 | get_job_market (tool 23), full 10-category civic_report coverage, create_full_demo orchestrator, pipeline architecture refactor, Yelp 869 businesses, submission |
 
 ---
 
@@ -243,4 +292,4 @@ momentum-mgm/
 
 Alexandre Breton (StyxKnight) — Architecture, AI, MCP, Civic Platform
 
-*Last updated: 2026-03-08 (Day 4)*
+*Last updated: 2026-03-09 (Day 5 — submission day)*
