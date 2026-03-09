@@ -7,6 +7,8 @@
 [![MCP](https://img.shields.io/badge/MCP-mcp.styxcore.dev%2Fmcp-green)](https://mcp.styxcore.dev/mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+🎙️ **Pitch Podcast:** [AI turns Montgomery complaints into policy](https://drive.google.com/file/d/1d4HqT5ZYtScCE3Li2Cd5yxYhhscY6N29/view)
+
 ---
 
 ## What is Momentum MGM?
