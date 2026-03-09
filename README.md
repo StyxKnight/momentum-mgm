@@ -93,7 +93,7 @@ All real data. No hallucination. Grounded in actual Montgomery statistics.
 
 ---
 
-## MCP Tools (19)
+## MCP Tools (20)
 
 ### Decidim Layer
 | Tool | Description |
@@ -133,6 +133,11 @@ All real data. No hallucination. Grounded in actual Montgomery statistics.
 | `sync_gcal` | Syncs all Decidim public meetings to Google Calendar with deduplication. Creates "Montgomery Civic — Public Meetings" calendar if needed. |
 | `create_report_slides` | Civic intelligence report → Google Slides presentation. |
 | `create_action_tasks` | Priority actions from civic analysis → Google Tasks. |
+
+### Participatory Budgeting Layer
+| Tool | Description |
+|---|---|
+| `get_budget_results` | Participatory budget voting results. Vote count per project, funded vs rejected (greedy by votes within total budget), voter turnout, funding gap. `budget_id` optional — defaults to most recent active budget. Pure SQL, instant. Reusable every budget cycle. |
 
 ---
 

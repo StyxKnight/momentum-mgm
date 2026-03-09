@@ -251,6 +251,11 @@ def _next_steps(tool: str, context: dict = None) -> list[dict]:
             {"tool": "civic_report",   "why": "Full analysis of the neighborhood most relevant to your search results", "example": f'civic_report({nb_arg})'},
             {"tool": "find_solutions", "why": "Find real programs targeting the issues surfaced by the search",         "example": 'find_solutions(problem="<topic>")'},
         ],
+        "get_budget_results": [
+            {"tool": "civic_report",   "why": "Deep-dive on the neighborhoods where funded projects are located — Census trends + ArcGIS incidents + ADI/SVI/EJI scores", "example": 'civic_report(neighborhood="North Montgomery / Chisholm")'},
+            {"tool": "find_solutions", "why": "For rejected projects, find alternative federal funding streams (HUD, EPA, DOT) to fill the gap", "example": 'find_solutions(problem="housing rehabilitation", neighborhood="North Montgomery / Chisholm")'},
+            {"tool": "create_report_doc", "why": "Export these results as a formatted Google Doc briefing for city council", "example": 'create_report_doc(neighborhood="West Side")'},
+        ],
     }
 
     return FLOWS.get(tool, [])
@@ -2313,6 +2318,99 @@ Write only the comment text."""
         "comment_id": comment.get("id"),
         "comment_preview": comment_body[:300],
         "platform_url": f"{os.getenv('DECIDIM_URL')}/processes",
+    }, ensure_ascii=False, indent=2)
+
+
+# ── TOOL 20 — get_budget_results ────────────────────────────────────────────────
+@mcp.tool()
+def get_budget_results(budget_id: int = None) -> str:
+    """
+    Returns participatory budget voting results for any Decidim budget cycle.
+    budget_id: optional — if omitted, uses the most recently created active budget.
+    Shows: vote count per project, funded vs rejected (greedy by votes within total budget),
+    voter turnout, and amount gap between requested and available.
+    Pure SQL — no AI, instant. Use after citizens have voted on the platform.
+    Reusable every year — just pass the new budget_id when a new cycle starts.
+    """
+    conn = get_db()
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        # Find budget — use provided ID or most recent
+        if budget_id:
+            cur.execute("""
+                SELECT b.id, b.title->>'en' as title, b.total_budget
+                FROM decidim_budgets_budgets b WHERE b.id = %s
+            """, (budget_id,))
+        else:
+            cur.execute("""
+                SELECT b.id, b.title->>'en' as title, b.total_budget
+                FROM decidim_budgets_budgets b
+                JOIN decidim_budgets_projects p ON p.decidim_budgets_budget_id = b.id
+                GROUP BY b.id, b.title, b.total_budget
+                HAVING COUNT(p.id) > 0
+                ORDER BY b.id DESC LIMIT 1
+            """)
+        budget = cur.fetchone()
+        if not budget:
+            conn.close()
+            return json.dumps({"error": "No budget found. Specify budget_id or ensure a budget exists with projects."})
+
+        bid = budget["id"]
+
+        # Vote counts per project
+        cur.execute("""
+            SELECT p.id as project_id, p.title->>'en' as title, p.budget_amount,
+                   COUNT(li.id) as vote_count
+            FROM decidim_budgets_projects p
+            LEFT JOIN decidim_budgets_line_items li ON li.decidim_project_id = p.id
+            WHERE p.decidim_budgets_budget_id = %s AND p.deleted_at IS NULL
+            GROUP BY p.id, p.title, p.budget_amount
+            ORDER BY vote_count DESC, p.budget_amount DESC
+        """, (bid,))
+        vote_results = cur.fetchall()
+
+        # Total voters who checked out
+        cur.execute("""
+            SELECT COUNT(DISTINCT decidim_user_id) as total_voters
+            FROM decidim_budgets_orders
+            WHERE decidim_budgets_budget_id = %s AND checked_out_at IS NOT NULL
+        """, (bid,))
+        total_voters = (cur.fetchone() or {}).get("total_voters") or 0
+
+    conn.close()
+
+    total_budget = budget["total_budget"]
+    total_requested = sum(r["budget_amount"] for r in vote_results)
+
+    # Funded projects: greedy by votes descending, within total budget
+    funded_ids = set()
+    remaining = total_budget
+    for r in vote_results:
+        if r["budget_amount"] <= remaining:
+            funded_ids.add(r["project_id"])
+            remaining -= r["budget_amount"]
+
+    results = [
+        {
+            "project_id": r["project_id"],
+            "title": r["title"],
+            "budget_amount": r["budget_amount"],
+            "vote_count": r["vote_count"],
+            "vote_share_pct": round(r["vote_count"] / max(1, total_voters) * 100, 1),
+            "status": "funded" if r["project_id"] in funded_ids else "rejected",
+        }
+        for r in vote_results
+    ]
+
+    return json.dumps({
+        "budget_id": bid,
+        "budget_title": budget["title"],
+        "total_budget": total_budget,
+        "total_requested": total_requested,
+        "funding_gap": total_requested - total_budget,
+        "total_voters": total_voters,
+        "funded_projects": [r for r in results if r["status"] == "funded"],
+        "rejected_projects": [r for r in results if r["status"] == "rejected"],
+        "next_steps": _next_steps("get_budget_results"),
     }, ensure_ascii=False, indent=2)
 
 
