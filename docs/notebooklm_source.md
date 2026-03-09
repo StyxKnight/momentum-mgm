@@ -148,6 +148,22 @@ Everything runs on a single Raspberry Pi 5 with 8GB of RAM and an NVMe SSD. Deci
 
 ---
 
+## Digital Sovereignty
+
+Momentum MGM runs entirely on a Raspberry Pi 5 with 8GB of RAM and an NVMe SSD, in a living room, served through a Cloudflare tunnel. This is not a limitation — it's a design principle.
+
+**No cloud dependency.** The civic platform, the database, the AI bridge, the data pipeline — all of it runs on hardware that costs $120. A city government, a community organization, or a neighborhood association can deploy this without an AWS account, without a Google Cloud contract, without a Microsoft Azure subscription. The infrastructure bill is approximately $0/month beyond the hardware.
+
+**Citizen data stays local.** On a cloud platform, citizen proposals, voting patterns, and demographic data get stored on servers owned by corporations in other jurisdictions. On Momentum MGM, the data lives on a machine the operator controls. For city governments that have legal obligations around citizen data privacy — or communities with good reasons to distrust centralized infrastructure — this matters.
+
+**Replicable anywhere.** The Raspberry Pi 5 proves the floor. Any city with $120 and a broadband connection can run this. The architecture scales up — you can move the database to a bigger server, add replicas, use a real rack — but you never *have* to. A community of 10,000 people in rural Alabama can run the same civic AI stack as a neighborhood in Montreal.
+
+**Digital agility.** Because there's no cloud vendor, there's no migration cost, no SLA negotiation, no multi-year contract. The system is updated with a `git pull`. It's restarted with `systemctl restart`. It's backed up with `pg_dump`. The entire operational model fits in one person's head.
+
+The limitation is real: a single Raspberry Pi has bounded traffic capacity. Under serious production load — thousands of concurrent users — it would need to scale. But for a city the size of Montgomery deploying this to real citizens, with proper load management and caching, it's viable. And the architecture is containerizable and cloud-deployable when needed. The sovereignty choice is reversible. The vendor lock-in on a proprietary platform is not.
+
+---
+
 ## The Innovations We Built This Week
 
 **Day 1 (March 5):** Decidim deployed from scratch on ARM64 — not trivial, required custom Ruby compilation. Live at mgm.styxcore.dev.

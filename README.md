@@ -229,6 +229,8 @@ The MCP server is what makes Momentum MGM a different category of product — no
 
 Brazil is building toward this. We shipped it.
 
+**Digital sovereignty by design.** Every component — Decidim, PostgreSQL, the MCP server, the data pipeline — runs on a $120 Raspberry Pi 5. No AWS. No Azure. No GCP. Citizen data stays on hardware the operator controls. Any city, neighborhood association, or community organization can deploy this without a cloud contract. The architecture scales up when needed, but never requires it.
+
 ---
 
 ## Tech Stack
@@ -245,7 +247,7 @@ Brazil is building toward this. We shipped it.
 | Data — Private | Bright Data SDK (Zillow, Yelp) |
 | MCP Server | Python 3.12, FastMCP, stdio + streamable-HTTP transports |
 | Google Workspace | Sheets + Docs + Calendar + Drive (OAuth2) |
-| Infrastructure | Raspberry Pi 5 8GB, NVMe SSD, Cloudflare tunnel |
+| Infrastructure | Raspberry Pi 5 8GB, NVMe SSD, Cloudflare tunnel — no cloud dependency |
 
 ---
 
