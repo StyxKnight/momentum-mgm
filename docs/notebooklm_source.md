@@ -69,7 +69,7 @@ Behind the platform sits a data lake of 80,000+ real records from Montgomery, Al
 - 14 years of data = time series for trend analysis
 
 **From Bright Data (private web data):**
-- 869 Yelp business listings in Montgomery: ratings, review counts, closure status, categories
+- 1,561 Yelp business listings in Montgomery: ratings, review counts, closure status, categories
 - 500 Zillow property listings: prices, square footage, days on market, neighborhood
 
 **Embeddings:**
@@ -82,7 +82,7 @@ Behind the platform sits a data lake of 80,000+ real records from Montgomery, Al
 
 The MCP server is the soul of Momentum MGM. MCP stands for Model Context Protocol — it's a standard developed by Anthropic that lets AI models like Claude call external tools during a conversation. Instead of just answering from training data, Claude can call live functions that query real databases, analyze real data, and write back to real systems.
 
-Our MCP server has 24 tools. It runs at mcp.styxcore.dev/mcp. Anyone with Claude can add this URL in their settings and immediately have access to Montgomery's civic intelligence layer.
+Our MCP server has 22 tools. It runs at mcp.styxcore.dev/mcp. Anyone with Claude can add this URL in their settings and immediately have access to Montgomery's civic intelligence layer.
 
 The server is organized in a strict pipeline where each layer feeds the next:
 
@@ -174,7 +174,7 @@ The limitation is real: a single Raspberry Pi has bounded traffic capacity. Unde
 
 **Day 4 (March 8):** Google Workspace integration. MCP HTTP transport live. Tools tested end-to-end.
 
-**Day 5 (March 9):** get_job_market tool added — Census workforce analysis with city comparisons. civic_report expanded to cover all 10 civic categories (was missing transportation, education, parks, governance even though the data existed). create_full_demo orchestrator built. Pipeline architecture documented and enforced — output tools refactored to be agnostic formatters. Yelp data expanded to 869 businesses.
+**Day 5 (March 9):** get_job_market tool added — Census workforce analysis with city comparisons. civic_report expanded to cover all 10 civic categories (was missing transportation, education, parks, governance even though the data existed). get_job_market added. civic_report expanded to all 10 civic categories. create_full_demo orchestrator built. Pipeline architecture refactored — output tools enforced as agnostic formatters with no AI inside. Yelp expanded to 1,561 businesses. 22 tools total.
 
 ---
 

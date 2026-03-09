@@ -137,6 +137,22 @@ mcp = FastMCP(
         allowed_origins=["https://mcp.styxcore.dev", "https://claude.ai"],
     ),
 )
+
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+
+@mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
+async def oauth_protected_resource(request: Request) -> JSONResponse:
+    return JSONResponse({"resource": "https://mcp.styxcore.dev/mcp", "authorization_servers": []})
+
+@mcp.custom_route("/.well-known/oauth-protected-resource/mcp", methods=["GET"])
+async def oauth_protected_resource_mcp(request: Request) -> JSONResponse:
+    return JSONResponse({"resource": "https://mcp.styxcore.dev/mcp", "authorization_servers": []})
+
+@mcp.custom_route("/.well-known/oauth-authorization-server", methods=["GET"])
+async def oauth_authorization_server(request: Request) -> JSONResponse:
+    return JSONResponse({"issuer": "https://mcp.styxcore.dev", "authorization_endpoint": "https://mcp.styxcore.dev/oauth/authorize"})
+
 openrouter = AsyncOpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=os.getenv("OPENROUTER_API_KEY"),
@@ -1569,32 +1585,18 @@ async def export_to_sheet(neighborhood: str) -> str:
 # TOOL 19 — create_report_doc
 # ─────────────────────────────────────────────
 @mcp.tool()
-async def create_report_doc(neighborhood: str) -> str:
-    """Generate a full civic intelligence report as a Google Doc shared with the admin."""
+async def create_report_doc(neighborhood: str, report_data: dict = None, solutions_data: dict = None) -> str:
+    """Agnostic formatter — receives civic_report and find_solutions outputs and creates a Google Doc. Pass report_data and solutions_data from previous tool calls."""
     import workspace_client as ws
     from datetime import datetime
 
     date_str = datetime.now().strftime("%B %d, %Y")
     title = f"Civic Intelligence Report — {neighborhood} — {date_str}"
 
-    report_data = {}
-    solutions_data = {}
-
-    try:
-        report_raw = await civic_report(neighborhood)
-        report_data = json.loads(report_raw)
-    except Exception as e:
-        report_data = {"error": str(e)}
-
-    try:
-        # Build specific problem string from actual findings
-        declining = [f.get("metric_cited","") for f in (report_data.get("findings") or []) if f.get("trend") == "declining"]
-        severity = report_data.get("overall_severity", "high")
-        problem_str = f"{severity} severity neighborhood — issues: {', '.join(declining) if declining else 'housing, poverty, infrastructure'}"
-        solutions_raw = await find_solutions(problem_str, neighborhood)
-        solutions_data = json.loads(solutions_raw)
-    except Exception as e:
-        solutions_data = {"error": str(e)}
+    if report_data is None:
+        report_data = {}
+    if solutions_data is None:
+        solutions_data = {}
 
     # Get deprivation scores separately
     scores_raw = analyze_neighborhood(neighborhood, "all")
@@ -2493,8 +2495,26 @@ async def create_full_demo(neighborhood: str = "Centennial Hill") -> str:
     budget    = json.loads(get_budget_results())
     meetings  = json.loads(await get_meetings(upcoming_only=True))
 
-    # ── OUTPUT (agnostic formatters — find_solutions runs inside create_report_doc) ──
-    doc_raw    = await create_report_doc(nb)
+    # ── SOLUTIONS (Brave Search × 3 + Gemini — federal programs + best practices) ──
+    top_signal = report.get("strongest_signal") or "housing poverty"
+    solutions  = json.loads(await find_solutions(problem=top_signal, neighborhood=nb))
+
+    # ── CIVIC LOOP (AI closes the loop — posts grounded response on Decidim) ─────
+    proposal_list = proposals.get("proposals", [])
+    ai_comment    = None
+    ai_comment_id = None
+    if proposal_list:
+        first_pid = str(proposal_list[0].get("id", ""))
+        if first_pid:
+            try:
+                ai_comment = json.loads(await asyncio.wait_for(post_ai_response(first_pid), timeout=60))
+                ai_comment_id = ai_comment.get("comment_id")
+            except Exception:
+                pass
+
+    # ── OUTPUT (agnostic formatters — find_solutions already called above) ────────
+    doc_raw    = await create_report_doc(nb, report_data=report, solutions_data=solutions)
+
     slides_raw = await create_report_slides(nb)
     sheet_raw  = await export_to_sheet(nb)
 
@@ -2521,9 +2541,16 @@ async def create_full_demo(neighborhood: str = "Centennial Hill") -> str:
             "poverty_pct":           job.get("poverty", {}).get("poverty_rate_pct"),
             "severity":              report.get("overall_severity"),
             "strongest_signal":      report.get("strongest_signal"),
+            "federal_programs_found": len(solutions.get("federal_programs", [])),
             "citizen_proposals":     len(proposals.get("proposals", [])),
             "funded_projects":       len(budget.get("funded_projects", [])),
             "upcoming_meetings":     len(meetings.get("meetings", [])),
+            "ai_civic_loop": {
+                "proposal_id":   first_pid if proposal_list else None,
+                "comment_posted": ai_comment_id is not None,
+                "comment_id":    ai_comment_id,
+                "platform_url":  f"https://mgm.styxcore.dev" if ai_comment_id else None,
+            },
         },
         "submit_these": {
             "platform":    "https://mgm.styxcore.dev",
