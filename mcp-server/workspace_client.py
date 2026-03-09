@@ -120,6 +120,16 @@ def create_doc(title: str, sections: list) -> tuple:
     return doc_id, f"https://docs.google.com/document/d/{doc_id}/edit"
 
 
+def make_public(file_id: str) -> None:
+    """Share a Drive file publicly — anyone with the link can view."""
+    drive = get_drive_service()
+    drive.permissions().create(
+        fileId=file_id,
+        body={'type': 'anyone', 'role': 'reader'},
+        fields='id'
+    ).execute()
+
+
 def _share_with_admin(file_id: str) -> None:
     admin_email = os.getenv('GOOGLE_ADMIN_EMAIL')
     if not admin_email:

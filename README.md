@@ -62,28 +62,45 @@ LAYER 3 — MCP SERVER (19 tools, Python FastMCP)
 
 ---
 
-## The Governance Loop
+## Tool Architecture
+
+Tools are organized in a strict pipeline. Each layer feeds the next. **Output tools are agnostic formatters** — they receive structured data from AI tools and format it. They do not generate content themselves.
 
 ```
-CITIZEN submits proposal on mgm.styxcore.dev
-    ↓
-DETECT     get_census_trend()          14yr OLS regression per metric, R² confidence
-           get_city_incidents()        19 ArcGIS sources, neighborhood-filtered
-           get_business_health()       Yelp closure rates, avg rating
-           get_job_market()            Unemployment, income, education, poverty vs city avg
+── DETECT (pure SQL, no AI) ──────────────────────────────────────────────────
+get_census_trend()        14yr OLS regression, R² confidence per metric
+get_city_incidents()      19 ArcGIS sources, neighborhood-filtered, raw counts
+get_business_health()     Yelp: closure rate, avg rating, top categories
+get_job_market()          Census ACS: unemployment, income, education, poverty vs city avg
 
-UNDERSTAND analyze_neighborhood()     ADI + SVI + EJI composite deprivation scores
-           detect_civic_gaps()        Silent zones — high incidents, zero citizen voice
-           semantic_civic_search()    pgvector cosine similarity across all civic data
-           summarize_comments()       Sentiment + theme extraction on proposal comments
+── ANALYZE (math, no AI) ─────────────────────────────────────────────────────
+analyze_neighborhood()    ADI + SVI + EJI — z-score + percentile vs 71 tracts
+detect_civic_gaps()       gap_score = incident_load / max(1, proposals) — silent zones
+semantic_civic_search()   pgvector cosine similarity across 61K embeddings
 
-REPORT     civic_report()             Full AI report — RAG + Gemini 2.5 Flash + CoT
-           find_solutions()           Federal programs + comparable cities + concrete actions
+── REPORT (Gemini 2.5 Flash — content generated here) ───────────────────────
+civic_report()            RAG + CoT — aggregates DETECT + ANALYZE → AI findings
+find_solutions()          Brave Search × 3 + Gemini → federal programs + best practices
 
-ACT        post_ai_response()         Civic loop closed: neighborhood report → AI comment on Decidim
-           export_to_sheet()          Neighborhood data → Google Sheets (live)
-           create_report_doc()        Full report → Google Doc (shareable)
-           sync_gcal()                Public meetings → Google Calendar
+── CITIZEN VOICE (Decidim GraphQL) ──────────────────────────────────────────
+get_proposals()           Live citizen proposals — compared vs AI findings
+get_budget_results()      Participatory budget: vote counts, funded vs rejected
+get_meetings()            Public meetings and hearings
+summarize_comments()      Sentiment + themes on any proposal thread
+
+── ACT (Decidim write — Gemini inside) ──────────────────────────────────────
+post_ai_response()        Closes the loop: AI findings → grounded comment on Decidim
+post_debate_summary()     AI synthesis of pro/contra positions → posted on Decidim
+
+── OUTPUT (agnostic formatters — no AI, receive structured data) ─────────────
+create_report_doc()       civic_report + find_solutions → Google Doc
+create_report_slides()    civic_report + find_solutions → Google Slides
+export_to_sheet()         DETECT + ANALYZE outputs → Google Sheets
+sync_gcal()               Decidim meetings → Google Calendar
+create_action_tasks()     find_solutions recommendations → Google Tasks
+
+── ORCHESTRATOR ──────────────────────────────────────────────────────────────
+create_full_demo()        Runs full pipeline in order → public Doc + Slides + Sheet
 ```
 
 **Example:** City administrator asks Claude: *"What is happening in West Montgomery and what should we do?"*

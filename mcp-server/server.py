@@ -1601,51 +1601,11 @@ async def create_report_doc(neighborhood: str) -> str:
     scores_data = json.loads(scores_raw)
     score_dict = scores_data.get("scores", {}) or {}
 
-    # ── Rewrite as executive briefing prose via Gemini ──────────────────────────
-    briefing_prompt = f"""You are a senior policy analyst writing a municipal briefing document for the City of Montgomery, Alabama city council.
-Rewrite the following civic intelligence data as a professional, readable government briefing.
-
-Rules:
-- Write in complete sentences and paragraphs. No bullet points in the summary.
-- Explain what every abbreviation means the first time you use it.
-- Translate numbers into human impact: instead of "housing_vacant: 207.6", write "over 200 abandoned properties".
-- Use plain English that a city council member with no data science background can understand.
-- Keep each section concise: 2-4 sentences max per section.
-- Do NOT invent data not present below.
-
-RAW DATA:
-Neighborhood: {neighborhood}
-Overall severity: {report_data.get('overall_severity','')}
-Severity rationale: {report_data.get('severity_rationale','')}
-Strongest signal: {report_data.get('strongest_signal','')}
-Key findings: {json.dumps([f.get('finding','') for f in (report_data.get('findings') or [])], ensure_ascii=False)}
-Deprivation scores: {json.dumps({k: v.get('interpretation','') for k,v in score_dict.items()}, ensure_ascii=False)}
-Federal programs available: {json.dumps([p.get('name','') + ' — ' + p.get('description','') for p in (solutions_data.get('federal_programs') or [])], ensure_ascii=False)}
-Comparable cities: {json.dumps([c.get('city','') + ': ' + c.get('lesson','') for c in (solutions_data.get('comparable_cities') or [])], ensure_ascii=False)}
-Recommended actions: {json.dumps(solutions_data.get('montgomery_recommendations',[]), ensure_ascii=False)}
-Urgency: {solutions_data.get('urgency','')} — Timeline: {solutions_data.get('estimated_timeline','')}
-
-Return a JSON object with these exact keys:
-{{
-  "executive_summary": "3-4 sentence plain English overview of the neighborhood situation",
-  "situation_analysis": "2-3 sentences explaining what the deprivation scores mean in plain English",
-  "key_findings_prose": ["One clear sentence per finding, no jargon, no abbreviations"],
-  "federal_programs_prose": ["One paragraph per program: what it is, how much money, why it fits this neighborhood"],
-  "cities_prose": ["One sentence per city: what they did and the concrete result"],
-  "actions_prose": ["One clear action sentence per recommendation, written as a directive to city staff"],
-  "closing": "One sentence on urgency and timeline"
-}}"""
-
-    briefing_raw = await _generate_json(briefing_prompt, temperature=0.2)
-    try:
-        briefing = json.loads(briefing_raw)
-    except Exception:
-        briefing = {}
-
     severity = report_data.get("overall_severity", "unknown").upper()
-    urgency = solutions_data.get("urgency", "")
+    urgency  = solutions_data.get("urgency", "")
     timeline = solutions_data.get("estimated_timeline", "")
 
+    # ── Format sections directly from tool outputs — no extra AI call ────────
     sections = []
     sections.append((title, "h1"))
     sections.append((f"Prepared by Momentum MGM Civic AI  —  mgm.styxcore.dev  —  {date_str}", "body"))
@@ -1653,50 +1613,47 @@ Return a JSON object with these exact keys:
     sections.append(("", "body"))
 
     sections.append(("EXECUTIVE SUMMARY", "h2"))
-    sections.append((briefing.get("executive_summary", report_data.get("severity_rationale", "")), "body"))
+    sections.append((report_data.get("severity_rationale", ""), "body"))
     sections.append(("", "body"))
 
-    sections.append(("SITUATION ANALYSIS", "h2"))
-    sections.append((briefing.get("situation_analysis", ""), "body"))
+    sections.append(("STRONGEST SIGNAL", "h2"))
+    sections.append((report_data.get("strongest_signal", ""), "body"))
     sections.append(("", "body"))
 
     sections.append(("KEY FINDINGS", "h2"))
-    for finding in (briefing.get("key_findings_prose") or [f.get("finding","") for f in (report_data.get("findings") or [])]):
-        sections.append((str(finding), "bullet"))
+    for f in (report_data.get("findings") or []):
+        sections.append((f"[{f.get('category','').upper()}] {f.get('finding','')} — trend: {f.get('trend','')}", "bullet"))
+    sections.append(("", "body"))
+
+    sections.append(("DEPRIVATION SCORES", "h2"))
+    for idx, s in score_dict.items():
+        sections.append((f"{idx.upper()}: {s.get('score','')} — {s.get('interpretation','')}", "bullet"))
     sections.append(("", "body"))
 
     sections.append(("RECOMMENDED FEDERAL PROGRAMS", "h2"))
-    for prog_prose in (briefing.get("federal_programs_prose") or []):
-        sections.append((str(prog_prose), "bullet"))
+    for p in (solutions_data.get("federal_programs") or []):
+        sections.append((f"{p.get('program', p.get('name',''))} — {p.get('description','')}", "bullet"))
+        if p.get("url"):
+            sections.append((p["url"], "body"))
         sections.append(("", "body"))
-
-    sections.append(("COMPARABLE CITIES & BEST PRACTICES", "h2"))
-    for city_prose in (briefing.get("cities_prose") or []):
-        sections.append((str(city_prose), "bullet"))
-    sections.append(("", "body"))
 
     sections.append(("GLOBAL BEST PRACTICES", "h2"))
     for gp in (solutions_data.get("global_best_practices") or []):
-        line = f"{gp.get('city','')} — {gp.get('practice','')}. Result: {gp.get('outcome','')}"
-        sections.append((line, "bullet"))
+        sections.append((f"{gp.get('city','')} — {gp.get('approach', gp.get('practice',''))}. Result: {gp.get('outcome','')}", "bullet"))
     sections.append(("", "body"))
 
     sections.append(("RECOMMENDED ACTIONS FOR MONTGOMERY", "h2"))
     if urgency:
-        sections.append((f"Priority level: {urgency.upper()} — Estimated timeline to see impact: {timeline}", "body"))
-    for action in (briefing.get("actions_prose") or solutions_data.get("montgomery_recommendations") or []):
+        sections.append((f"Priority: {urgency.upper()} — Timeline: {timeline}", "body"))
+    for action in (solutions_data.get("montgomery_recommendations") or []):
         sections.append((str(action), "bullet"))
     sections.append(("", "body"))
 
-    if briefing.get("closing"):
-        sections.append((briefing["closing"], "body"))
-        sections.append(("", "body"))
-
     sources = report_data.get("_sources", {}) or {}
     sections.append(("DATA SOURCES", "h2"))
-    sections.append((f"Census data: {sources.get('census_tracts', 'U.S. Census ACS 5-year estimates 2012-2024')}", "body"))
-    sections.append((f"City incident data: {', '.join(sources.get('incidents_sources', []))}", "body"))
-    sections.append((f"Deprivation methodology: Area Deprivation Index (UW Madison/HRSA), Social Vulnerability Index (CDC/ATSDR), Environmental Justice Index (EPA)", "body"))
+    sections.append((f"Census: {sources.get('census_tracts', 'U.S. Census ACS 5-year estimates 2012-2024')}", "body"))
+    sections.append((f"City incidents: {', '.join(sources.get('incidents_sources', []))}", "body"))
+    sections.append(("Methodology: ADI (UW Madison/HRSA), SVI (CDC/ATSDR), EJI (EPA)", "body"))
     sections.append(("", "body"))
     sections.append(("Generated by Momentum MGM Civic AI — mgm.styxcore.dev", "body"))
 
@@ -2492,6 +2449,91 @@ def get_job_market(neighborhood: str = None) -> str:
 
     conn.close()
     return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+# ── TOOL 24 — create_full_demo ───────────────────────────────────────────────
+
+@mcp.tool()
+async def create_full_demo(neighborhood: str = "Centennial Hill") -> str:
+    """
+    DEMO tool — runs the complete Momentum MGM tool chain in logical order.
+
+    Pipeline:
+      DETECT   detect_civic_gaps → get_census_trend → get_city_incidents
+               → get_business_health → get_job_market
+      ANALYZE  analyze_neighborhood (ADI / SVI / EJI)
+      REPORT   civic_report (Gemini 2.5 Flash — RAG + CoT)
+      CITIZENS get_proposals → get_budget_results → get_meetings
+      OUTPUT   create_report_doc → create_report_slides → export_to_sheet
+               → make_public (Anyone with link)
+
+    Returns all public links ready to submit to judges.
+    Default: Centennial Hill (highest deprivation in Montgomery).
+    ⚠ LATENCY: 3-5 minutes.
+    """
+    from workspace_client import make_public
+
+    nb = _resolve_neighborhood(neighborhood) or "Centennial Hill"
+
+    # ── DETECT ────────────────────────────────────────────────────────────────
+    gaps     = json.loads(await detect_civic_gaps(top_n=3))
+    census   = json.loads(get_census_trend(nb))
+    incidents = json.loads(get_city_incidents("code_violations", nb))
+    business = json.loads(get_business_health(nb))
+    job      = json.loads(get_job_market(nb))
+
+    # ── ANALYZE ───────────────────────────────────────────────────────────────
+    scores   = json.loads(analyze_neighborhood(nb, "all"))
+
+    # ── REPORT (Gemini inside) ────────────────────────────────────────────────
+    report   = json.loads(await civic_report(nb))
+
+    # ── CITIZEN VOICE ─────────────────────────────────────────────────────────
+    proposals = json.loads(await get_proposals(limit=5))
+    budget    = json.loads(get_budget_results())
+    meetings  = json.loads(await get_meetings(upcoming_only=True))
+
+    # ── OUTPUT (agnostic formatters — find_solutions runs inside create_report_doc) ──
+    doc_raw    = await create_report_doc(nb)
+    slides_raw = await create_report_slides(nb)
+    sheet_raw  = await export_to_sheet(nb)
+
+    doc_data    = json.loads(doc_raw)
+    slides_data = json.loads(slides_raw)
+    sheet_data  = json.loads(sheet_raw)
+
+    for fid in [doc_data.get("doc_id"), slides_data.get("presentation_id"), sheet_data.get("spreadsheet_id")]:
+        if fid:
+            try:
+                make_public(fid)
+            except Exception:
+                pass
+
+    return json.dumps({
+        "status": "success",
+        "neighborhood": nb,
+        "pipeline": {
+            "civic_gaps_detected":   len(gaps.get("gaps", [])),
+            "census_metrics":        len(census.get("metrics", {})),
+            "incidents_total":       incidents.get("total", 0),
+            "yelp_businesses":       business.get("total", 0),
+            "unemployment_pct":      job.get("workforce", {}).get("unemployment_rate_pct"),
+            "poverty_pct":           job.get("poverty", {}).get("poverty_rate_pct"),
+            "severity":              report.get("overall_severity"),
+            "strongest_signal":      report.get("strongest_signal"),
+            "citizen_proposals":     len(proposals.get("proposals", [])),
+            "funded_projects":       len(budget.get("funded_projects", [])),
+            "upcoming_meetings":     len(meetings.get("meetings", [])),
+        },
+        "submit_these": {
+            "platform":    "https://mgm.styxcore.dev",
+            "mcp_server":  "https://mcp.styxcore.dev/mcp",
+            "github":      "https://github.com/StyxKnight/momentum-mgm",
+            "demo_doc":    doc_data.get("doc_url"),
+            "demo_slides": slides_data.get("slides_url"),
+            "demo_sheet":  sheet_data.get("sheet_url"),
+        },
+    }, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":
